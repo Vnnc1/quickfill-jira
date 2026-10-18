@@ -2570,6 +2570,7 @@ function renderDay(rawRep) {
   const box = $("dayBox");
   box.innerHTML = "";
   const { goal, cap, start, end } = rep.workday;
+  state.dayView = { date: rep.date, total: rep.total, goal };   // janela flutuante: o minimizado mostra o dia filtrado
   const colorOf = new Map(rep.issues.map((it, i) => [it.key, ISSUE_COLORS[i % ISSUE_COLORS.length]]));
 
   /* --- destaque: total x meta --- */
@@ -3322,6 +3323,7 @@ function renderToday() {
   const colorOf = new Map(issues.map((it, i) => [it.key, ISSUE_COLORS[i % ISSUE_COLORS.length]]));
   const avg = averageBefore(prog, d, 10);
   const streak = streakAt(prog, d);
+  DV.view = { date: d, total, goal };   // janela flutuante: o minimizado mostra o dia filtrado
 
   /* --- herói --- */
   const hero = el("div", "card dv-hero");
@@ -5572,10 +5574,13 @@ $("btnLayout").addEventListener("click", async () => {
   }
 });
 
-/* ---------- Janela flutuante (teste, só no QA) ---------- */
-if (ROLE === "qa") {
+/* ---------- Janela flutuante (teste, QA e DEV) ---------- */
+if (ROLE === "qa" || ROLE === "dev") {
   $("btnPop")?.addEventListener("click", () => popOutFromPanel({ saveView, toast }));
-  initFloat({ mode: () => state.mode, toast, saveView });
+  initFloat({
+    mode: () => state.mode, toast, saveView, fmt: fmtDur, dayShort, today: todayISO,
+    day: () => (state.mode === "day" ? state.dayView : state.mode === "today" ? DV.view : null),
+  });
 }
 
 /* ---------- Aviso de nova versão (repositório da equipe) ---------- */

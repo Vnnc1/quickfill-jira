@@ -1218,7 +1218,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .inp:focus-visible
 
 /* ---------- Janela flutuante (teste, só no QA): ícone, minimizado, compacto, expandido ---------- */
 .float-only, .pop-only, #floatIcon, #floatMini, #floatPin { display: none !important; }
-html.float .float-only, html.panel.role-qa:not(.float) .pop-only { display: grid !important; }
+html.float .float-only, html.panel:is(.role-qa, .role-dev):not(.float) .pop-only { display: grid !important; }
+#btnLayout { display: none !important; }   /* modal grande sobre o Jira desativado por enquanto */
 html.float #btnDiscard, html.float #btnLayout, html.float #btnClose, html.float .zoom { display: none !important; }
 .top-actions .ic svg { width: 16px; height: 16px; display: block; }
 .ic.on { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
@@ -1248,6 +1249,7 @@ html.float[data-size="mini"] .app, html.float[data-size="icon"] .app { height: 1
 .float-icon:hover img { transform: scale(1.06); }
 .float-mini { align-items: center; gap: 8px; height: 100vh; padding: 0 6px 0 12px; }
 .float-mini .ring { width: 38px; height: 38px; flex: none; }
+.fm-badge { min-width: 38px; height: 38px; padding: 0 6px; border-radius: 10px; display: grid; place-items: center; flex: none; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
 .fm-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
 .fm-line { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
 .fm-key { font-family: var(--mono); font-size: 11.5px; color: var(--accent); font-weight: 650; white-space: nowrap; }

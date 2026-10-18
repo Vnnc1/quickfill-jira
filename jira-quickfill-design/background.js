@@ -2903,9 +2903,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 /* ---------- Painel lateral x modal grande ---------- */
 
 // Guardado em memória: sidePanel.open() só funciona dentro do gesto do usuário (sem esperar o storage).
-let _openMode = "panel";
-chrome.storage.sync.get({ openMode: "panel" }).then((v) => { _openMode = v.openMode || "panel"; }).catch(() => {});
-chrome.storage.onChanged.addListener((ch, area) => { if (area === "sync" && ch.openMode) _openMode = ch.openMode.newValue || "panel"; });
+// O modal grande sobre o Jira está desativado por enquanto: sempre abre no painel lateral.
+const _openMode = "panel";
 // Ícone da extensão na barra abre o painel lateral
 chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});
 

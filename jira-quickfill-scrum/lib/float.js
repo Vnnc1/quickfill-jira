@@ -1,5 +1,5 @@
 /**
- * Janela flutuante do QuickFill (teste, só no QA).
+ * Janela flutuante do QuickFill (teste, QA e DEV).
  *
  * A mesma página modal.html roda em três lugares:
  *   - barra lateral do Chrome      → botão "Soltar como janela" abre uma janela popup e fecha a barra
@@ -104,28 +104,70 @@ export function initFloat(api) {
     if (KIND === "pip") bc.postMessage({ t: "pip-size", size: s });
   }
 
-  /* ---- minimizado: resumo da aba atual ---- */
+  /* ---- minimizado: resumo da aba atual, com o filtro e a data que estão na tela ---- */
+  const C = 94.25;
+  // "visível" pela marcação (no minimizado o resto da tela está escondido de propósito)
+  const visible = (el) => el && !el.closest(".hidden, .role-off, [hidden]");
+  const tabLabel = (mode) => document.querySelector(`.tab[data-mode="${mode}"]`)?.textContent.trim() || "QuickFill";
+
+  /** Filtros ativos: Espaço/Período do topo e o primeiro seletor da aba. */
+  function filters(mode) {
+    const out = [];
+    for (const bar of document.querySelectorAll(".spacebar")) if (visible(bar)) { const on = bar.querySelector(".seg button.on"); if (on) out.push(on.textContent.trim()); }
+    const pane = document.querySelector(`[data-pane="${mode}"]`);
+    const own = pane && [...pane.querySelectorAll(".seg button.on:not([data-sort])")].find(visible);
+    if (own) out.push(own.textContent.trim());
+    return [...new Set(out)].join(", ");
+  }
+
+  function showRing(total, goal) {
+    $("fmRingSvg").classList.remove("hidden"); $("fmBadge").classList.add("hidden");
+    $("fmRing").style.strokeDashoffset = String(C * (1 - Math.min(1, goal ? total / goal : 0)));
+  }
+  function showBadge(text) {
+    $("fmRingSvg").classList.add("hidden"); $("fmBadge").classList.remove("hidden");
+    $("fmBadge").textContent = text;
+  }
+
   function fillMini() {
-    $("fmRing").style.strokeDashoffset = $("ringFg").style.strokeDashoffset || "94.25";
-    const day = $("dayPillVal").textContent.trim();
     const mode = api.mode();
     const quick = $("fmQuick"), act = $("fmAction");
     quick.classList.add("hidden");
+    act.textContent = "Abrir"; act.dataset.do = "open"; act.disabled = false;
+
     if (mode === "single") {
+      $("fmRing").style.strokeDashoffset = $("ringFg").style.strokeDashoffset || String(C);
+      $("fmRingSvg").classList.remove("hidden"); $("fmBadge").classList.add("hidden");
       const sel = document.querySelector("#subtaskList .item.sel");
       const spent = $("spent")?.value.trim();
       $("fmKey").textContent = sel?.querySelector(".k")?.textContent.trim() || "";
       $("fmTitle").textContent = sel ? sel.querySelector(".s")?.textContent.trim() || "" : "Nenhuma subtarefa escolhida";
-      $("fmSub").textContent = sel ? (spent ? `${spent} para apontar` : `Hoje: ${day}`) : "Abra para buscar a tarefa";
+      $("fmSub").textContent = sel ? (spent ? `${spent} para apontar` : `Hoje: ${$("dayPillVal").textContent.trim()}`) : "Abra para buscar a tarefa";
       if (sel) { quick.classList.remove("hidden"); act.textContent = "Aplicar"; act.dataset.do = "apply"; act.disabled = $("btnApply").disabled; }
-      else { act.textContent = "Buscar"; act.dataset.do = "open"; act.disabled = false; }
-    } else {
-      const label = document.querySelector(`.tab[data-mode="${mode}"]`)?.textContent.trim() || "QuickFill";
-      $("fmKey").textContent = "";
-      $("fmTitle").textContent = mode === "day" ? `${day} hoje` : label;
-      $("fmSub").textContent = mode === "day" ? $("dayPillGoal").textContent : `Hoje: ${day}`;
-      act.textContent = "Abrir"; act.dataset.do = "open"; act.disabled = false;
+      else act.textContent = "Buscar";
+      return;
     }
+
+    const day = api.day?.();
+    if (day && (mode === "day" || mode === "today")) {
+      showRing(day.total, day.goal);
+      const when = day.date === api.today() ? "hoje" : api.dayShort(day.date);
+      $("fmKey").textContent = tabLabel(mode);
+      $("fmTitle").textContent = `${api.fmt(day.total)} de ${api.fmt(day.goal)}`;
+      $("fmSub").textContent = `${when}, ${day.total >= day.goal ? "meta batida" : `faltam ${api.fmt(day.goal - day.total)}`}`;
+      return;
+    }
+
+    // demais abas: o primeiro número de destaque da tela, com os filtros aplicados
+    const pane = document.querySelector(`[data-pane="${mode}"]`);
+    const hero = pane?.querySelector(".t-hero-l");
+    const tile = hero ? null : [...(pane?.querySelectorAll(".quick.on, .m-kpi, .kpi, .dm-tile") || [])].find(visible);
+    const value = (hero || tile)?.querySelector("b")?.textContent.trim();
+    const label = hero ? hero.querySelector("span")?.textContent.trim() : tile?.querySelector("span")?.textContent.replace(/^[^\p{L}\d]+/u, "").trim();
+    $("fmKey").textContent = tabLabel(mode);
+    if (value) { showBadge(value.length > 7 ? value.split(" ")[0] : value); $("fmTitle").textContent = label || ""; }
+    else { showRing(0, 1); $("fmTitle").textContent = "Abra para ver os detalhes"; }
+    $("fmSub").textContent = filters(mode) || `Hoje: ${$("dayPillVal").textContent.trim()}`;
   }
   setInterval(() => { if (size === "mini" && !document.hidden) fillMini(); }, 5000);
 
@@ -178,12 +220,24 @@ export function initFloat(api) {
         if (unpinning) { unpinning = false; restoreWindow(); }
         else window.close();     // fechou a janela fixada no X: fecha tudo
       });
-      const me = await chrome.windows.getCurrent();
-      await chrome.windows.update(me.id, { state: "minimized" });
       root.classList.add("float-owner");
+      await hideOwner();
     } catch (e) {
       pip = null;
       api.toast(`Não deu para fixar: ${e.message}`);
+    }
+  }
+
+  /** Esconde esta janela comum enquanto a fixada estiver aberta (ela precisa continuar existindo). */
+  async function hideOwner() {
+    const me = await chrome.windows.getCurrent();
+    const minimize = () => chrome.windows.update(me.id, { state: "minimized", focused: false }).catch(() => {});
+    await minimize();
+    await new Promise((r) => setTimeout(r, 350));
+    let w = await chrome.windows.get(me.id).catch(() => null);
+    if (w && w.state !== "minimized") { await minimize(); await new Promise((r) => setTimeout(r, 350)); w = await chrome.windows.get(me.id).catch(() => null); }
+    if (w && w.state !== "minimized") {
+      chrome.windows.update(me.id, { state: "normal", left: -32000, top: -32000, width: 120, height: 60, focused: false }).catch(() => {});
     }
   }
 

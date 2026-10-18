@@ -12,10 +12,11 @@
     <!-- ============ Janela flutuante (QA): ícone e minimizado ============ -->
     <button id="floatIcon" class="float-icon" title="Abrir o QuickFill" aria-label="Abrir o QuickFill"><img src="icons/icon48.png" alt="" /></button>
     <div id="floatMini" class="float-mini">
-      <svg viewBox="0 0 36 36" class="ring" aria-hidden="true">
+      <svg viewBox="0 0 36 36" class="ring" id="fmRingSvg" aria-hidden="true">
         <circle cx="18" cy="18" r="15" class="ring-bg" />
         <circle cx="18" cy="18" r="15" class="ring-fg" id="fmRing" />
       </svg>
+      <span class="fm-badge hidden" id="fmBadge"></span>
       <div class="fm-txt">
         <div class="fm-line"><span class="fm-key" id="fmKey"></span><b id="fmTitle"></b></div>
         <small id="fmSub"></small>
