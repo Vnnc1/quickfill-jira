@@ -17,7 +17,7 @@ import { renderIcon, ICON_SIZES } from "./tools/icons.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const SRC = join(ROOT, "jira-quickfill-qa");
-const VERSION = "4.3.2";
+const VERSION = "4.4.0";
 
 const ROLES = {
   qa: {

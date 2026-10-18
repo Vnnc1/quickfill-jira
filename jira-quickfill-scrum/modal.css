@@ -1180,3 +1180,38 @@ html.panel .top { padding-top: 10px; }
 #recentBox { display: flex; flex-direction: column; gap: 6px; }
 #recentAll { align-self: flex-start; }
 #panelScope { margin-left: 0; }
+
+/* ---------- 4.4: leitura — contraste, rótulos, letras mínimas, sem textos cortados ---------- */
+/* Texto fraco legível (4,9:1 sobre o fundo) */
+:root { --faint: #8593a4; }
+
+/* Rótulos em letra normal, sem caixa alta espaçada */
+.spacebar-l, .group, .team-sep, .t-hero-l small { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 600; }
+.spacebar-l { color: var(--muted); opacity: 1; }
+
+/* Tamanho mínimo das letras: 11px em selos, 11,5px em texto de apoio */
+.daypill-txt small, .item .st, .legend, .work .stx, .zoom span, .p-name em, .p-tot small,
+.prio, .t-info .p-name em, .t-tot small, .t-feed-row small, .dr-side .hrs, .stackbar i,
+.fgroup-t .n, .team-sep button { font-size: 11px; }
+.fld small, .kpi span, .stack-legend, .dr-meta, .p-meta, .p-goals label, .sp-left, .sp-dates,
+.sp-meta, .sp-next, .m-kpi small, .m-row-sub, .dm-tile span, .t-chip, .t-state, .t-now, .t-now b,
+.btn.xs-btn, .work .h, .item .k, .m-row-top .k { font-size: 11.5px; }
+.ty, .tt, .tag, .tag-parent, .sp-space { font-size: 10px; }
+/* Eixos dos gráficos na fonte do texto, sem a monoespaçada miúda */
+.scale, .hcol small, .dv-col small, .pg-col small, .p-hist .hb small,
+.t-lane-track.scale-only small, .hist .goal-line span, .t-info .p-delta { font-size: 10.5px; font-family: inherit; }
+.pg-goal::after { font-size: 10.5px; }
+.burn-lab { font-size: 10.5px; font-family: inherit; }
+
+/* Nada cortado com "…": títulos e detalhes quebram em até 2 linhas */
+.m-kpi small, .fld small { white-space: normal; overflow: visible; text-overflow: clip; }
+.m-row-top .s, .item .s, .m-row-sub {
+  white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; text-overflow: clip;
+}
+
+/* Barras de progresso com a cor do perfil, sem degradê roxo */
+.sp-time i, .meter-line i { background: var(--accent); }
+
+/* Foco visível para quem usa o teclado */
+button:focus-visible, a:focus-visible, summary:focus-visible, .inp:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

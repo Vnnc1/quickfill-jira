@@ -85,6 +85,8 @@ function jiraLink(key, { base, label = "Jira", title } = {}) {
 const pad = (n) => String(n).padStart(2, "0");
 const fmtHM = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const fmtDur = (m) => { m = Math.round(m || 0); const h = Math.floor(m / 60), r = m % 60; return h ? (r ? `${h}h ${r}m` : `${h}h`) : `${r}m`; };
+/** Concordância com a quantidade: pl(1, "dia útil", "dias úteis") → "dia útil". Zero e 2 ou mais vão para o plural. */
+const pl = (n, one, many) => (Math.abs(Number(n) || 0) >= 2 || !Number(n) ? many : one);
 const todayISO = () => { const n = new Date(); return `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(n.getDate())}`; };
 const DOW = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
 const dow = (d) => { const [y, m, da] = d.split("-").map(Number); return new Date(Date.UTC(y, m - 1, da)).getUTCDay(); };
@@ -2051,14 +2053,14 @@ function renderTeam() {
   if (hiddenCount) {
     const sep = document.createElement("div");
     sep.className = "team-sep";
-    sep.append(document.createTextNode(`${hiddenCount} pessoa(s) oculta(s)`));
+    sep.append(document.createTextNode(`${hiddenCount} ${pl(hiddenCount, "pessoa oculta", "pessoas ocultas")}`));
     const b = document.createElement("button");
     b.textContent = team.showHidden ? "esconder" : "mostrar";
     b.addEventListener("click", () => { team.showHidden = !team.showHidden; renderTeam(); });
     sep.appendChild(b);
     box.appendChild(sep);
   }
-  if (d.partial) note(box, "warn", `${d.partial} tarefa(s) não puderam ser lidas agora (limite do Jira) — os totais podem estar menores; tentando de novo na próxima atualização.`);
+  if (d.partial) note(box, "warn", `${d.partial} ${pl(d.partial, "tarefa não pôde ser lida", "tarefas não puderam ser lidas")} agora (limite do Jira) — os totais podem estar menores; tentando de novo na próxima atualização.`);
   if (d.truncated) note(box, "warn", "Dia com mais de 1000 tarefas apontadas: a lista foi limitada. Restrinja os projetos nas Opções.");
   const foot = document.createElement("p");
   foot.className = "muted xs";
@@ -2678,7 +2680,7 @@ function renderDay(rawRep) {
   for (const d of rep.history) {
     const col = document.createElement("button");
     col.className = "hcol" + (d.goalMet ? " met" : d.total ? " part" : "") + (d.date === rep.date ? " cur" : "");
-    col.title = `${dayShort(d.date)} · ${fmtDur(d.total)} · ${d.issues} demanda(s)`;
+    col.title = `${dayShort(d.date)} · ${fmtDur(d.total)} · ${d.issues} ${pl(d.issues, "demanda", "demandas")}`;
     const bar = document.createElement("span");
     bar.className = "b";
     bar.style.height = `${Math.max(2, BAR_PX * Math.min(1, d.total / cap))}px`;
@@ -2887,7 +2889,7 @@ function renderBatchResult(res) {
 function renderCreateResult(res) {
   const box = $("result");
   box.innerHTML = "";
-  box.appendChild(resultHead(!res.failed, `${res.created} criada(s) · ${res.reused} já existia(m) · ${res.failed} com erro`));
+  box.appendChild(resultHead(!res.failed, `${res.created} ${pl(res.created, "criada", "criadas")} · ${res.reused} ${pl(res.reused, "já existia", "já existiam")} · ${res.failed} com erro`));
   for (const r of res.results) {
     box.appendChild(stepLine({ ok: r.ok, step: `${r.parentKey}${r.key ? ` → ${r.key}` : ""}`, detail: r.detail }));
   }
@@ -3707,7 +3709,7 @@ function sprintCard(r, st) {
     const all = daysOfRange(sp.start, r.end).filter((d) => !isWeekendIso(d));
     const done = all.filter((d) => d <= today).length;
     top.append(el("span", "sp-space", sp.space), el("b", null, sp.name),
-      el("span", `pg-sprint-st ${sp.current ? "on" : ""}`, sp.current ? (today > r.end ? "encerra hoje" : `faltam ${all.length - done} dia(s) útil(eis)`) : "encerrada"));
+      el("span", `pg-sprint-st ${sp.current ? "on" : ""}`, sp.current ? (today > r.end ? "encerra hoje" : `faltam ${all.length - done} ${pl(all.length - done, "dia útil", "dias úteis")}`) : "encerrada"));
   }
   card.appendChild(top);
   for (const p of parts) {
@@ -3727,7 +3729,7 @@ function sprintCard(r, st) {
     if (info?.stats) card.appendChild(el("div", "pg-sprint-bits", `${info.stats.done} de ${info.stats.total} concluídas na sprint · suas: ${info.stats.mineDone}/${info.stats.mine}`));
     if (p.goal) card.appendChild(el("div", "muted xs", `Objetivo: ${p.goal}`));
   }
-  card.appendChild(el("div", "pg-sprint-bits", `Você: ${fmtDur(st.total)} em ${st.activeIssues} demanda(s) da${sp.all ? "s" : ""} sprint${sp.all ? "s" : ""}.`));
+  card.appendChild(el("div", "pg-sprint-bits", `Você: ${fmtDur(st.total)} em ${st.activeIssues} ${pl(st.activeIssues, "demanda", "demandas")} da${sp.all ? "s" : ""} sprint${sp.all ? "s" : ""}.`));
   return card;
 }
 
@@ -3816,7 +3818,7 @@ function renderProgress() {
   card.appendChild(projs.length > 1
     ? legend(projs.map((p) => [projColor(p), `${p} ${fmtDur(st.projects[p] || 0)}`]))
     : legend([["var(--ok)", "meta batida"], ["var(--data)", "abaixo da meta"], ["var(--err)", "acima do teto"]]));
-  if (st.best?.total) card.appendChild(el("p", "muted xs", `Seu melhor dia: ${dayShort(st.best.date)} com ${fmtDur(st.best.total)}.${st.emptyDays ? ` ${st.emptyDays} dia(s) útil(eis) sem apontamento${keys ? " em demandas da sprint" : ""}.` : ""}`));
+  if (st.best?.total) card.appendChild(el("p", "muted xs", `Seu melhor dia: ${dayShort(st.best.date)} com ${fmtDur(st.best.total)}.${st.emptyDays ? ` ${st.emptyDays} ${pl(st.emptyDays, "dia útil", "dias úteis")} sem apontamento${keys ? " em demandas da sprint" : ""}.` : ""}`));
   box.appendChild(card);
 
   /* --- semana x semana --- */
@@ -3832,7 +3834,7 @@ function renderProgress() {
 
   /* --- onde foi seu tempo (segue o filtro: período ou sprint) --- */
   if (DV.prefs.where && st.issues.length) {
-    const c = mCard("Onde foi seu tempo", `${st.activeIssues} demanda(s) · ${r.sprint ? (r.sprint.all ? "sprints atuais" : r.sprint.name) : r.label}`);
+    const c = mCard("Onde foi seu tempo", `${st.activeIssues} ${pl(st.activeIssues, "demanda", "demandas")} · ${r.sprint ? (r.sprint.all ? "sprints atuais" : r.sprint.name) : r.label}`);
     const proj = Object.entries(st.projects).sort((a, b) => b[1] - a[1]);
     if (proj.length > 1) {
       const pb = el("div", "stackbar tall");
@@ -3850,7 +3852,7 @@ function renderProgress() {
       const sg = el("i");
       sg.style.flex = String(it.minutes / st.total);
       sg.style.background = ISSUE_COLORS[i % ISSUE_COLORS.length];
-      sg.dataset.tip = `${it.key} · ${it.summary}\n${fmtDur(it.minutes)} (${pct(it.minutes / st.total)}) em ${it.days} dia(s)`;
+      sg.dataset.tip = `${it.key} · ${it.summary}\n${fmtDur(it.minutes)} (${pct(it.minutes / st.total)}) em ${it.days} ${pl(it.days, "dia", "dias")}`;
       bar.appendChild(sg);
     });
     if (rest) { const sg = el("i"); sg.style.flex = String(rest / st.total); sg.style.background = "var(--surface-3)"; sg.dataset.tip = `Outras ${st.issues.length - 8}: ${fmtDur(rest)}`; bar.appendChild(sg); }
@@ -3858,7 +3860,7 @@ function renderProgress() {
     // Para cada demanda, a atuação dia a dia no período (um quadrinho por dia útil)
     const cols = st.series.filter((x) => x.counted).map((x) => x.date);
     top.forEach((it, i) => {
-      const line = issueLine(it, `${fmtDur(it.minutes)} · ${pct(it.minutes / st.total)}`, `${it.status}${it.parentKey ? ` · ↳ ${it.parentKey}` : ""} · ${it.days} dia(s)`);
+      const line = issueLine(it, `${fmtDur(it.minutes)} · ${pct(it.minutes / st.total)}`, `${it.status}${it.parentKey ? ` · ↳ ${it.parentKey}` : ""} · ${it.days} ${pl(it.days, "dia", "dias")}`);
       const dot = el("i", "dv-dot"); dot.style.background = ISSUE_COLORS[i % ISSUE_COLORS.length];
       line.prepend(dot);
       const strip = el("div", "pg-days");
@@ -3963,7 +3965,7 @@ function renderDemands() {
   /* --- 1º: em seu nome agora (pendentes), com a demanda em que você está atuando em destaque --- */
   const pend = b.pending.filter(matchPrio);
   if (pend.length) {
-    const c = mCard("📌 Em seu nome agora", `${pend.length} pendente(s)`);
+    const c = mCard("📌 Em seu nome agora", `${pend.length} ${pl(pend.length, "pendente", "pendentes")}`);
     c.id = "dm-doing";
     for (const r of pend.slice(0, 20)) {
       const i = r.issue;
@@ -4035,10 +4037,10 @@ function renderDemands() {
     box.appendChild(e);
   }
   const parts = [];
-  if (b.worked) parts.push(`você apontou em ${b.worked} demanda(s) ${DV.dmPeriod === "today" ? "hoje" : "no período"}`);
+  if (b.worked) parts.push(`você apontou em ${b.worked} ${pl(b.worked, "demanda", "demandas")} ${DV.dmPeriod === "today" ? "hoje" : "no período"}`);
   if (b.groups.shipped.length) parts.push(`${b.firstPass} de ${b.groups.shipped.length} finalizadas sem reabrir`);
   if (parts.length) box.appendChild(el("p", "muted xs", `${parts.join(" · ")}.`));
-  if (b.extra.prd.length) box.appendChild(el("p", "muted xs", `${b.extra.prd.length} demanda(s) foram para deploy de produção no período (fora dos cartões).`));
+  if (b.extra.prd.length) box.appendChild(el("p", "muted xs", `${b.extra.prd.length} ${pl(b.extra.prd.length, "demanda foi", "demandas foram")} para deploy de produção no período (fora dos cartões).`));
   if (dm.truncated) note(box, "warn", "Mais de 300 demandas: mostrando as atualizadas mais recentemente.");
 }
 
@@ -4318,7 +4320,7 @@ function renderSprint() {
     const all = list.flatMap(({ space: sp, sprint: s }) => s.issues.map((i) => ({ i, sp })));
     const hits = all.filter(({ i }) => [i.key, i.summary, i.assignee?.name, i.parentKey, i.parentSummary, i.status.name, i.type]
       .some((v) => normName(v).includes(q)));
-    const c = mCard(`🔎 “${SC.search.trim()}”`, `${hits.length} resultado(s)`);
+    const c = mCard(`🔎 “${SC.search.trim()}”`, `${hits.length} ${pl(hits.length, "resultado", "resultados")}`);
     c.classList.add("search-card");
     for (const { i, sp } of hits.slice(0, 40)) {
       const right = el("span", "dm-right");
@@ -4339,7 +4341,7 @@ function renderSprint() {
     const card = el("div", "card pg-sprint");
     const top = el("div", "pg-sprint-top");
     top.append(el("span", "sp-space", sp.project), el("b", null, s.name),
-      el("span", `pg-sprint-st on`, h.left ? `faltam ${h.left} dia(s) útil(eis) além de hoje` : today > (s.end || today) ? "passou do fim" : "último dia"));
+      el("span", `pg-sprint-st on`, h.left ? `faltam ${h.left} ${pl(h.left, "dia útil", "dias úteis")} além de hoje` : today > (s.end || today) ? "passou do fim" : "último dia"));
     card.appendChild(top);
     card.appendChild(el("div", "muted xs", `${s.start ? brShort(s.start) : "?"} → ${s.end ? brShort(s.end) : "?"} · dia ${h.elapsed} de ${h.days.length} úteis`));
     if (s.goal) card.appendChild(el("div", "sc-goal", `🎯 ${s.goal}`));
@@ -4354,7 +4356,7 @@ function renderSprint() {
       }
       const subs = s.issues.filter((i) => i.isSubtask);
       if (subs.length) types.appendChild(chip(`Subtarefas ${subs.filter((i) => stageOf(i) === "done").length}/${subs.length}`, "", "Subtarefas das demandas da sprint (não entram na contagem da sprint)"));
-      if (h.byStage.blocked.length) types.appendChild(chip(`⛔ ${h.byStage.blocked.length} impedida(s)`, "warn", "Em Impedido / Aguardando"));
+      if (h.byStage.blocked.length) types.appendChild(chip(`⛔ ${h.byStage.blocked.length} ${pl(h.byStage.blocked.length, "impedida", "impedidas")}`, "warn", "Em Impedido / Aguardando"));
       card.appendChild(types);
     }
 
@@ -4380,7 +4382,7 @@ function renderSprint() {
       const fc = el("div", `dv-pace ${h.onTrack ? "up" : "down"}`);
       fc.append(el("b", null, h.onTrack ? "▲" : "▼"), el("span", null, h.onTrack
         ? `No ritmo atual a sprint fecha completa (${h.done} concluídas, ~${(h.elapsed ? h.done / h.elapsed : 0).toFixed(1).replace(".", ",")} por dia útil).`
-        : `No ritmo atual devem sair ~${h.forecast} de ${h.total} até o fim. Faltam ${h.total - h.done} em ${h.left} dia(s) útil(eis).`));
+        : `No ritmo atual devem sair ~${h.forecast} de ${h.total} até o fim. Faltam ${h.total - h.done} em ${h.left} ${pl(h.left, "dia útil", "dias úteis")}.`));
       card.appendChild(fc);
     }
     box.appendChild(card);
@@ -4390,7 +4392,7 @@ function renderSprint() {
     if (P.deploy && feito.length) {
       const over = feito.length >= scSettings().feitoThreshold;
       const w = el("div", `dv-pace ${over ? "down" : "up"} sc-deploy`);
-      const txt = el("span", null, `${feito.length} card(s) em Feito/PR esperando deploy${over ? ` — passou do limite de ${scSettings().feitoThreshold}` : ""}.`);
+      const txt = el("span", null, `${feito.length} ${pl(feito.length, "card", "cards")} em Feito/PR esperando deploy${over ? ` — passou do limite de ${scSettings().feitoThreshold}` : ""}.`);
       const b = el("button", `btn sm ${over ? "primary" : ""}`, "Criar card “Realizando Deploy”");
       b.addEventListener("click", () => openDeployForm(sp, s, feito));
       w.append(el("b", null, "☑"), txt, b);
@@ -4464,12 +4466,12 @@ function renderSprint() {
       k.append(
         kpiTile(f.cycleAvg ? fmtSpan(f.cycleAvg) : "—", "cycle time", "1º andamento → concluído", "", "Tempo médio entre começar e concluir"),
         kpiTile(f.qaWaitAvg ? fmtSpan(f.qaWaitAvg) : "—", "na validação", "tempo médio por item", f.qaWaitAvg > 2 * 864e5 ? "warn" : "", "Tempo médio que um item fica na coluna Validação"),
-        kpiTile(pct(f.reopenRate), "reabertas", `${f.reopened} item(ns)`, f.reopenRate > 0.2 ? "warn" : "", "Itens que entraram em Reaberto ao menos uma vez"),
+        kpiTile(pct(f.reopenRate), "reabertas", `${f.reopened} ${pl(f.reopened, "item", "itens")}`, f.reopenRate > 0.2 ? "warn" : "", "Itens que entraram em Reaberto ao menos uma vez"),
         kpiTile(f.firstPassRate == null ? "—" : pct(f.firstPassRate), "aprovadas de 1ª", "passaram pelo QA sem reabrir", f.firstPassRate != null && f.firstPassRate >= 0.8 ? "ok" : ""),
       );
       fc.appendChild(k);
-      const bits = [`vazão: ${f.throughput.toFixed(1).replace(".", ",")} concluída(s) por dia útil ${PERIOD_LABEL[SC.period]}`, `${f.wipNow} em andamento agora`];
-      if (f.blockedNow) bits.push(`${f.blockedNow} impedida(s)${f.blockedAvg ? ` · tempo médio impedido ${fmtSpan(f.blockedAvg)}` : ""}`);
+      const bits = [`vazão: ${f.throughput.toFixed(1).replace(".", ",")} ${pl(f.throughput, "concluída", "concluídas")} por dia útil ${PERIOD_LABEL[SC.period]}`, `${f.wipNow} em andamento agora`];
+      if (f.blockedNow) bits.push(`${f.blockedNow} ${pl(f.blockedNow, "impedida", "impedidas")}${f.blockedAvg ? ` · tempo médio impedido ${fmtSpan(f.blockedAvg)}` : ""}`);
       fc.appendChild(el("p", "muted xs", `${bits.join(" · ")}.`));
       box.appendChild(fc);
     }
@@ -4761,7 +4763,7 @@ function renderPeople() {
     kpiTile(String(devs.length), "desenvolvedores", [qa.length && `+ ${qa.length} QA`, design.length && `${design.length} Design`].filter(Boolean).join(" · ") || "na sprint"),
     kpiTile(String(wipTot), "em andamento", `limite ${scSettings().wipLimit}/pessoa`),
     kpiTile(String(over), "acima do WIP", over ? "foco em terminar" : "tudo ok", over ? "warn" : "ok", "Desenvolvedores com mais itens em andamento que o limite"),
-    kpiTile(String(unassigned.length), "sem responsável", free ? `${free} dev(s) livre(s)` : "", unassigned.length ? "warn" : "ok"),
+    kpiTile(String(unassigned.length), "sem responsável", free ? `${free} ${pl(free, "dev livre", "devs livres")}` : "", unassigned.length ? "warn" : "ok"),
   );
   box.appendChild(k);
   if (filtered) box.appendChild(el("p", "muted xs", `Mostrando quem teve movimento ${PERIOD_LABEL[SC.period]} e só os itens que se moveram no período.`));
@@ -4809,15 +4811,15 @@ function renderPeople() {
     }, picked));
     const bits = [];
     if (filtered || p.isSm) bits.push(`${p.moves} movimentação(ões) ${PERIOD_LABEL[SC.period]}`);
-    if (filtered && p.doneInPeriod) bits.push(`✓ ${p.doneInPeriod} concluída(s) no período`);
+    if (filtered && p.doneInPeriod) bits.push(`✓ ${p.doneInPeriod} ${pl(p.doneInPeriod, "concluída", "concluídas")} no período`);
     if (p.wip) bits.push(`◐ ${p.wip} em andamento${p.oldest ? ` (mais antigo há ${p.oldest}d)` : ""}`);
-    if (p.stages.blocked.length) bits.push(`⛔ ${p.stages.blocked.length} impedida(s)`);
+    if (p.stages.blocked.length) bits.push(`⛔ ${p.stages.blocked.length} ${pl(p.stages.blocked.length, "impedida", "impedidas")}`);
     if (p.stages.todo.length) bits.push(`○ ${p.stages.todo.length} a fazer`);
     if (p.stages.feito.length) bits.push(`☑ ${p.stages.feito.length} em Feito/PR`);
     if (p.stages.qa.length) bits.push(`🔍 ${p.stages.qa.length} em validação`);
     if (!filtered && p.stages.done.length) bits.push(`✓ ${p.stages.done.length}${SC.data.fields.points && p.donePts ? ` (${p.donePts} pts)` : ""}`);
-    if (p.stalled) bits.push(`⏳ ${p.stalled} parada(s)`);
-    if (p.returns) bits.push(`🔁 ${p.returns} reabertura(s)`);
+    if (p.stalled) bits.push(`⏳ ${p.stalled} ${pl(p.stalled, "parada", "paradas")}`);
+    if (p.returns) bits.push(`🔁 ${p.returns} ${pl(p.returns, "reabertura", "reaberturas")}`);
     main.appendChild(el("div", "m-row-sub", bits.join(" · ") || "sem itens"));
     sm.append(av, main);
     det.appendChild(sm);
@@ -4906,7 +4908,7 @@ function renderRisks() {
   const qaQ = merged.qaQueue;
   if (qaQ.length >= 3) {
     const p = el("div", "dv-pace down");
-    p.append(el("b", null, "!"), el("span", null, `${qaQ.length} itens na coluna Validação — o mais antigo há ${qaQ[0].age} dia(s) útil(eis). Vale combinar prioridade com o QA na daily.`));
+    p.append(el("b", null, "!"), el("span", null, `${qaQ.length} itens na coluna Validação — o mais antigo há ${qaQ[0].age} ${pl(qaQ[0].age, "dia útil", "dias úteis")}. Vale combinar prioridade com o QA na daily.`));
     box.appendChild(p);
   }
 
@@ -5214,7 +5216,7 @@ function renderHus() {
   k.append(
     kpiTile(String(b.groups.queue.length), "na fila", inSprintQueue ? `${inSprintQueue} já na sprint` : ""),
     kpiTile(String(b.groups.doing.length), "prototipando"),
-    kpiTile(String(b.groups.review.length), "em revisão", b.rounds ? `${b.rounds} retorno(s) de revisão` : ""),
+    kpiTile(String(b.groups.review.length), "em revisão", b.rounds ? `${b.rounds} ${pl(b.rounds, "retorno", "retornos")} de revisão` : ""),
     kpiTile(`${b.thisWeek}/${d.weeklyGoal}`, "entregues na semana", "protótipo pronto → backlog do dev", b.thisWeek >= d.weeklyGoal ? "ok" : "", "HUs cujo protótipo foi concluído e seguiram para o backlog da sprint do dev nesta semana"),
   );
   box.appendChild(k);
@@ -5242,7 +5244,7 @@ function renderHus() {
     const bar = el("i", w.count >= d.weeklyGoal ? "met" : w.count ? "part" : "");
     bar.style.height = `${Math.max(w.count ? 4 : 0, (w.count / max) * 100)}%`;
     col.append(bar, el("small", null, brShort(w.week)));
-    col.dataset.tip = `Semana de ${brShort(w.week)}: ${w.count} HU(s) entregues`;
+    col.dataset.tip = `Semana de ${brShort(w.week)}: ${w.count} ${pl(w.count, "HU entregue", "HUs entregues")}`;
     chart.appendChild(col);
   }
   const gl = el("span", "pg-goal");
@@ -5252,7 +5254,7 @@ function renderHus() {
   wc.appendChild(chart);
   const bits = [];
   if (b.avgLead) bits.push(`tempo médio de prototipação: ${fmtSpan(b.avgLead)}`);
-  if (b.rounds) bits.push(`${b.rounds} volta(s) da revisão`);
+  if (b.rounds) bits.push(`${b.rounds} ${pl(b.rounds, "volta", "voltas")} da revisão`);
   if (bits.length) wc.appendChild(el("p", "muted xs", `${bits.join(" · ")}.`));
   box.appendChild(wc);
 
@@ -5331,7 +5333,7 @@ function renderQaQueue() {
   const high = rows.filter((r) => isHighPrio(r.i.priority)).length;
   k.append(
     kpiTile(String(rows.length), "aguardando validação", gspace.project || "todos os espaços"),
-    kpiTile(String(recent.length), `chegaram ${QP_LABEL[QP.period]}`, older.length ? `${older.length} mais antiga(s)` : ""),
+    kpiTile(String(recent.length), `chegaram ${QP_LABEL[QP.period]}`, older.length ? `${older.length} ${pl(older.length, "mais antiga", "mais antigas")}` : ""),
     kpiTile(String(high), "alta / crítica", "", high ? "warn" : "ok"),
     kpiTile(rows.length ? `${Math.max(...rows.map((r) => r.age))}d` : "—", "mais antiga", "dias úteis na fila", rows.some((r) => r.age >= 3) ? "warn" : ""),
   );
