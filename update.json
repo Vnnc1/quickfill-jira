@@ -1,29 +1,29 @@
 {
-  "version": "4.4.0",
+  "version": "4.5.0",
   "private": false,
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "installCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/quickfill.ps1 | iex\"",
   "guide": "https://github.com/Vnnc1/quickfill-jira#readme",
   "date": "2026-10-18",
-  "notes": "Leitura mais fácil: textos cinza com mais contraste, rótulos sem caixa alta, letras pequenas maiores, títulos sem corte com reticências, eixos dos gráficos legíveis e plurais certos (\"1 card\", \"3 dias úteis\").",
+  "notes": "Janela flutuante: na barra lateral, clique em \"Soltar como janela\" para usar o QuickFill fora do Chrome. O alfinete fixa a janela por cima de outros programas, com tamanho minimizado ou compacto (ajuste pelas bordas). O modal grande sobre o Jira saiu por enquanto: tudo abre na barra lateral.",
   "packages": {
     "qa": {
-      "version": "4.4.0",
+      "version": "4.5.0",
       "folder": "jira-quickfill-qa",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-qa.zip"
     },
     "dev": {
-      "version": "4.4.0",
+      "version": "4.5.0",
       "folder": "jira-quickfill-dev",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-dev.zip"
     },
     "scrum": {
-      "version": "4.4.0",
+      "version": "4.5.0",
       "folder": "jira-quickfill-scrum",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-scrum.zip"
     },
     "design": {
-      "version": "4.4.0",
+      "version": "4.5.0",
       "folder": "jira-quickfill-design",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-design.zip"
     }

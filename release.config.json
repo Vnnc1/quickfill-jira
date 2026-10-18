@@ -1,6 +1,6 @@
 {
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "branch": "master",
-  "notes": "Leitura mais fácil: textos cinza com mais contraste, rótulos sem caixa alta, letras pequenas maiores, títulos sem corte com reticências, eixos dos gráficos legíveis e plurais certos (\"1 card\", \"3 dias úteis\").",
+  "notes": "Janela flutuante: na barra lateral, clique em \"Soltar como janela\" para usar o QuickFill fora do Chrome. O alfinete fixa a janela por cima de outros programas, com tamanho minimizado ou compacto (ajuste pelas bordas). O modal grande sobre o Jira saiu por enquanto: tudo abre na barra lateral.",
   "private": false
 }

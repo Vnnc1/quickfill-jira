@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Jira QuickFill QA",
-  "version": "4.4.0",
+  "version": "4.5.0",
   "description": "QA: preenche datas, estimativa, apontamento e status de subtarefas (Testes Manuais), em uma tarefa ou em lote, com painel, equipe e meu dia.",
   "permissions": [
     "storage",
