@@ -2,6 +2,7 @@ import { parseDuration, humanize } from "./lib/duration.js";
 import { saveDraft, flushDraft, loadDraft, clearDraft, since } from "./lib/draft.js";
 import { ROLE, INSTALL_CMD } from "./lib/role.js";
 import { loadAccent } from "./lib/theme.js";
+import { initFloat, popOutFromPanel } from "./lib/float.js";
 import { addDaysIso, isWeekendIso, DAY_MS } from "./lib/dates.js";
 import { totalOf, byIssue, streakAt, averageBefore, averageUntil, periodStats, weekCompare, countedDays, demandBoard, deployLabel, feitoLabel, DEMAND_GROUPS } from "./lib/devstats.js";
 import { STAGES, RISKS, DESIGN_STAGES, HANDOFF_ITEMS, TYPE_LABEL, stageOf, typeGroup, normName, sprintHealth, sprintTree, peopleLoad,
@@ -5570,6 +5571,12 @@ $("btnLayout").addEventListener("click", async () => {
     catch { toast("Não deu para abrir o painel daqui — clique no ícone da extensão na barra do Chrome.", "info"); }
   }
 });
+
+/* ---------- Janela flutuante (teste, só no QA) ---------- */
+if (ROLE === "qa") {
+  $("btnPop")?.addEventListener("click", () => popOutFromPanel({ saveView, toast }));
+  initFloat({ mode: () => state.mode, toast, saveView });
+}
 
 /* ---------- Aviso de nova versão (repositório da equipe) ---------- */
 /** Comando de instalação com o id desta extensão: além de atualizar, libera o botão "Atualizar agora". */

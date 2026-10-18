@@ -9,6 +9,24 @@
 <body>
   <div class="app" id="app">
 
+    <!-- ============ Janela flutuante (QA): ícone e minimizado ============ -->
+    <button id="floatIcon" class="float-icon" title="Abrir o QuickFill" aria-label="Abrir o QuickFill"><img src="icons/icon48.png" alt="" /></button>
+    <div id="floatMini" class="float-mini">
+      <svg viewBox="0 0 36 36" class="ring" aria-hidden="true">
+        <circle cx="18" cy="18" r="15" class="ring-bg" />
+        <circle cx="18" cy="18" r="15" class="ring-fg" id="fmRing" />
+      </svg>
+      <div class="fm-txt">
+        <div class="fm-line"><span class="fm-key" id="fmKey"></span><b id="fmTitle"></b></div>
+        <small id="fmSub"></small>
+      </div>
+      <button id="fmQuick" class="fm-chip hidden">+15m</button>
+      <button id="fmAction" class="btn sm primary">Aplicar</button>
+      <button class="ic" id="fmPin" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/></svg></button>
+      <button class="ic" id="fmIcon" title="Recolher em ícone" aria-label="Recolher em ícone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="5"/></svg></button>
+      <button class="ic" id="fmGrow" title="Compacto" aria-label="Abrir no tamanho compacto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path class="g-grow" d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/><path class="g-shrink" d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/></svg></button>
+    </div>
+
     <!-- ============ Cabeçalho ============ -->
     <header class="top">
       <div class="brand">
@@ -36,10 +54,23 @@
       <div class="top-actions">
         <button class="ic" id="btnDiscard" title="Descartar rascunho">⟲</button>
         <button class="ic" id="btnLayout" title="Painel lateral / modal grande">◧</button>
+        <button class="ic pop-only" id="btnPop" title="Soltar como janela (pode ficar por cima de outros programas)" aria-label="Soltar como janela"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="14" height="13" rx="2"/><path d="M13 3h8v8M21 3l-8 8"/></svg></button>
+        <button class="ic float-only" id="btnPin" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/></svg></button>
+        <button class="ic float-only" id="btnMin" title="Minimizar" aria-label="Minimizar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 19h14"/></svg></button>
+        <button class="ic float-only" id="btnGrow" title="Expandir" aria-label="Expandir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path class="g-grow" d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/><path class="g-shrink" d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/></svg></button>
+        <button class="ic float-only" id="btnSide" title="Voltar para a barra lateral" aria-label="Voltar para a barra lateral"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
         <button class="ic" id="btnOptions" title="Opções">⚙</button>
         <button class="ic" id="btnClose" title="Fechar (Esc)">✕</button>
       </div>
     </header>
+
+    <div id="floatPin" class="float-pinbar">
+      <span id="floatPinTxt">Canto da tela</span>
+      <button class="corner" data-corner="tl" title="Canto superior esquerdo" aria-label="Canto superior esquerdo"><i></i></button>
+      <button class="corner" data-corner="tr" title="Canto superior direito" aria-label="Canto superior direito"><i></i></button>
+      <button class="corner" data-corner="bl" title="Canto inferior esquerdo" aria-label="Canto inferior esquerdo"><i></i></button>
+      <button class="corner" data-corner="br" title="Canto inferior direito" aria-label="Canto inferior direito"><i></i></button>
+    </div>
 
     <div id="staleBox" class="alert danger hidden">
       <span></span>

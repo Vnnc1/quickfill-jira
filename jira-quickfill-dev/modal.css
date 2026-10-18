@@ -1215,3 +1215,52 @@ html.panel .top { padding-top: 10px; }
 
 /* Foco visível para quem usa o teclado */
 button:focus-visible, a:focus-visible, summary:focus-visible, .inp:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- Janela flutuante (teste, só no QA): ícone, minimizado, compacto, expandido ---------- */
+.float-only, .pop-only, #floatIcon, #floatMini, #floatPin { display: none !important; }
+html.float .float-only, html.panel.role-qa:not(.float) .pop-only { display: grid !important; }
+html.float #btnDiscard, html.float #btnLayout, html.float #btnClose, html.float .zoom { display: none !important; }
+.top-actions .ic svg { width: 16px; height: 16px; display: block; }
+.ic.on { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.ic .g-shrink, .ic.is-full .g-grow { display: none; }
+.ic.is-full .g-shrink { display: inline; }
+
+/* Canto da tela */
+html.float #floatPin { display: flex !important; }
+html.float[data-size="mini"] #floatPin, html.float[data-size="icon"] #floatPin { display: none !important; }
+.float-pinbar { align-items: center; gap: 6px; margin: -10px 0 10px; padding: 7px 14px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12px; color: var(--muted); }
+.float-pinbar span { flex: 1; min-width: 0; }
+.float-pinbar .corner { width: 28px; height: 22px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; position: relative; padding: 0; }
+.float-pinbar .corner i { position: absolute; width: 9px; height: 6px; border-radius: 2px; background: var(--muted); }
+.float-pinbar [data-corner="tl"] i { left: 3px; top: 3px; } .float-pinbar [data-corner="tr"] i { right: 3px; top: 3px; }
+.float-pinbar [data-corner="bl"] i { left: 3px; bottom: 3px; } .float-pinbar [data-corner="br"] i { right: 3px; bottom: 3px; }
+.float-pinbar .corner.on { border-color: var(--accent); background: var(--accent-soft); }
+.float-pinbar .corner.on i { background: var(--accent); }
+
+/* Ícone e minimizado: só eles aparecem nesses tamanhos */
+html.float[data-size="mini"] .app > :not(#floatMini):not(#toast),
+html.float[data-size="icon"] .app > :not(#floatIcon) { display: none !important; }
+html.float[data-size="mini"] #floatMini { display: flex !important; }
+html.float[data-size="icon"] #floatIcon { display: grid !important; }
+html.float[data-size="mini"] .app, html.float[data-size="icon"] .app { height: 100vh; }
+.float-icon { width: 100vw; height: 100vh; border: 0; padding: 0; background: var(--bg); place-items: center; cursor: pointer; }
+.float-icon img { width: 40px; height: 40px; border-radius: 10px; transition: transform .15s; }
+.float-icon:hover img { transform: scale(1.06); }
+.float-mini { align-items: center; gap: 8px; height: 100vh; padding: 0 6px 0 12px; }
+.float-mini .ring { width: 38px; height: 38px; flex: none; }
+.fm-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.fm-line { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.fm-key { font-family: var(--mono); font-size: 11.5px; color: var(--accent); font-weight: 650; white-space: nowrap; }
+.fm-line b { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fm-txt small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fm-chip { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 4px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.fm-chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.float-mini .ic svg { width: 16px; height: 16px; display: block; }
+
+/* Troca de tamanho: o conteúdo entra suave (a moldura quem muda é o sistema) */
+@keyframes qfFloatIn { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+html.float .app.float-in > * { animation: qfFloatIn .18s cubic-bezier(.2, .8, .2, 1) both; }
+@media (prefers-reduced-motion: reduce) { html.float .app.float-in > * { animation: none; } }
+html.float .top-actions { gap: 2px; }
+html.float .top-actions .ic { width: 28px; height: 28px; }
+html.float[data-size="compact"] #btnOptions { display: none !important; }   /* Opções ficam no expandido */
