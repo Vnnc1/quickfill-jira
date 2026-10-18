@@ -1,5 +1,5 @@
 /**
- * Janela flutuante do QuickFill (teste, QA e DEV).
+ * Janela flutuante do QuickFill (teste, nos 4 perfis).
  *
  * A mesma página modal.html roda em três lugares:
  *   - barra lateral do Chrome      → botão "Soltar como janela" abre uma janela popup e fecha a barra
@@ -7,16 +7,15 @@
  *   - janela fixada (?float=pip)   → Document Picture-in-Picture aberta pela janela popup, que fica
  *                                    minimizada como "dona" dela (a janela fixada fecha se a dona fechar)
  *
- * Tamanhos: ícone → minimizado → compacto → expandido. As janelas conversam por BroadcastChannel.
+ * Tamanhos: minimizado e compacto. O compacto pode ser redimensionado pelas bordas da janela;
+ * o tamanho escolhido fica guardado. As janelas conversam por BroadcastChannel.
  */
 
 import { parseDuration, formatJira } from "./duration.js";
 
 export const FLOAT_SIZES = {
-  icon: { w: 64, h: 64 },
   mini: { w: 520, h: 62 },
-  compact: { w: 380, h: 560 },
-  full: { w: 480, h: 740 },
+  compact: { w: 380, h: 560 },   // padrão; vale o último tamanho que você deixou
 };
 const CORNER_NAME = { tl: "superior esquerdo", tr: "superior direito", bl: "inferior esquerdo", br: "inferior direito" };
 const MARGIN = 16;
@@ -39,6 +38,15 @@ function cornerXY(c, outerW, outerH, scr = window.screen) {
   };
 }
 
+/** Tamanho do compacto: o último que você ajustou pelas bordas, ou o padrão. */
+async function compactSize() {
+  try {
+    const { floatCompact } = await chrome.storage.local.get({ floatCompact: null });
+    if (floatCompact?.w >= 300 && floatCompact?.h >= 320) return floatCompact;
+  } catch { /* segue no padrão */ }
+  return FLOAT_SIZES.compact;
+}
+
 const floatUrl = (kind, size, win) =>
   chrome.runtime.getURL(`modal.html?float=${kind}&size=${size}${win ? `&win=${win}` : ""}`);
 
@@ -50,7 +58,7 @@ export async function popOutFromPanel({ saveView, toast }) {
   try {
     await saveView();   // a janela abre exatamente onde você está
     const browser = await chrome.windows.getCurrent();
-    const size = "compact", { w, h } = FLOAT_SIZES[size];
+    const size = "compact", { w, h } = await compactSize();
     const outerW = w + 16, outerH = h + 39;   // borda e barra de título; a janela corrige ao abrir
     const pos = cornerXY(await corner(), outerW, outerH);
     await chrome.windows.create({ url: floatUrl("window", size, browser.id), type: "popup", width: outerW, height: outerH, ...pos, focused: true });
@@ -69,14 +77,16 @@ export function initFloat(api) {
   const root = document.documentElement;
   root.classList.add("float", `float-${KIND}`);
   const win = Number(params.get("win")) || null;
-  let size = FLOAT_SIZES[params.get("size")] ? params.get("size") : "compact";
+  let size = params.get("size") === "mini" ? "mini" : "compact";
   let pip = null;            // (popup) janela fixada aberta por esta página
   let unpinning = false;
   const bc = channel();
+  let compactDims = FLOAT_SIZES.compact;   // em memória: fixar precisa abrir na hora do clique, sem esperar o storage
+  compactSize().then((d) => { compactDims = d; });
 
   /* ---- tamanho da janela que nos contém ---- */
   async function resizeHost(s) {
-    const { w, h } = FLOAT_SIZES[s];
+    const { w, h } = s === "mini" ? FLOAT_SIZES.mini : compactDims;
     if (KIND === "pip") {
       const host = window.parent;   // documento da janela fixada (mesma origem)
       try { host.resizeTo(w + (host.outerWidth - host.innerWidth), h + (host.outerHeight - host.innerHeight)); } catch { /* sem gesto: fica como está */ }
@@ -90,12 +100,20 @@ export function initFloat(api) {
     } catch { /* a janela continua no tamanho atual */ }
   }
 
+  /** Guarda o tamanho do compacto quando você o ajusta pelas bordas. */
+  let saveTimer = 0;
+  window.addEventListener("resize", () => {
+    if (size !== "compact") return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      const w = window.innerWidth, h = window.innerHeight;
+      if (w >= 300 && h >= 320) { compactDims = { w, h }; chrome.storage.local.set({ floatCompact: compactDims }).catch(() => {}); }
+    }, 400);
+  });
+
   function setSize(s, { resize = true } = {}) {
     size = s;
     root.dataset.size = s;
-    $("btnGrow").title = s === "full" ? "Compactar" : "Expandir";
-    $("btnGrow").setAttribute("aria-label", $("btnGrow").title);
-    $("btnGrow").classList.toggle("is-full", s === "full");
     if (s === "mini") fillMini();
     // transição curta do conteúdo (a moldura quem redimensiona é o sistema)
     const app = $("app");
@@ -158,6 +176,18 @@ export function initFloat(api) {
       return;
     }
 
+    // SCRUM, Sprint: andamento da sprint (itens feitos x tempo decorrido)
+    const sp = mode === "sprint" && document.querySelector('[data-pane="sprint"] .pg-sprint');
+    if (sp) {
+      const bars = [...sp.querySelectorAll(".sc-bar")].map((x) => [x.querySelector("span")?.textContent.trim(), x.querySelector("b")?.textContent.trim()]);
+      const items = bars.find(([k]) => /itens/i.test(k))?.[1] || "", time = bars.find(([k]) => /tempo/i.test(k))?.[1] || "";
+      showRing(parseFloat(items) || 0, 100);
+      $("fmKey").textContent = sp.querySelector(".pg-sprint-top b")?.textContent.trim() || tabLabel(mode);
+      $("fmTitle").textContent = sp.querySelector(".pg-sprint-st")?.textContent.trim() || "";
+      $("fmSub").textContent = [items && `itens ${items} feitos`, time && `tempo ${time}`].filter(Boolean).join(", ") || filters(mode);
+      return;
+    }
+
     // demais abas: o primeiro número de destaque da tela, com os filtros aplicados
     const pane = document.querySelector(`[data-pane="${mode}"]`);
     const hero = pane?.querySelector(".t-hero-l");
@@ -182,11 +212,8 @@ export function initFloat(api) {
     if (e.currentTarget.dataset.do === "apply" && !$("btnApply").disabled) { $("btnApply").click(); setTimeout(fillMini, 1500); return; }
     setSize("compact");
   });
-  $("fmIcon").addEventListener("click", () => setSize("icon"));
   $("fmGrow").addEventListener("click", () => setSize("compact"));
-  $("floatIcon").addEventListener("click", () => setSize("mini"));
   $("btnMin").addEventListener("click", () => setSize("mini"));
-  $("btnGrow").addEventListener("click", () => setSize(size === "full" ? "compact" : "full"));
 
   /* ---- fixar por cima de tudo ---- */
   const pinned = KIND === "pip";
@@ -205,10 +232,10 @@ export function initFloat(api) {
     if (!("documentPictureInPicture" in window)) return api.toast("Este Chrome não tem janela fixável (Picture-in-Picture). Atualize o Chrome.");
     if (pip) { pip.focus?.(); return; }
     try {
-      const { w, h } = FLOAT_SIZES[size];
+      const { w, h } = size === "mini" ? FLOAT_SIZES.mini : compactDims;
       pip = await window.documentPictureInPicture.requestWindow({ width: w, height: h });
       const d = pip.document;
-      d.title = "QuickFill QA";
+      d.title = document.title;
       d.body.style.cssText = "margin:0;background:#14171a;overflow:hidden";
       const f = d.createElement("iframe");
       f.src = floatUrl("pip", size, win);

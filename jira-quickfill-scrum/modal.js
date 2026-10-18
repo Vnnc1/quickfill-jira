@@ -5574,8 +5574,8 @@ $("btnLayout").addEventListener("click", async () => {
   }
 });
 
-/* ---------- Janela flutuante (teste, QA e DEV) ---------- */
-if (ROLE === "qa" || ROLE === "dev") {
+/* ---------- Janela flutuante (teste, nos 4 perfis) ---------- */
+{
   $("btnPop")?.addEventListener("click", () => popOutFromPanel({ saveView, toast }));
   initFloat({
     mode: () => state.mode, toast, saveView, fmt: fmtDur, dayShort, today: todayISO,

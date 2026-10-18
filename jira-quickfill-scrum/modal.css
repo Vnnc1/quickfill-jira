@@ -1216,19 +1216,18 @@ html.panel .top { padding-top: 10px; }
 /* Foco visível para quem usa o teclado */
 button:focus-visible, a:focus-visible, summary:focus-visible, .inp:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ---------- Janela flutuante (teste, só no QA): ícone, minimizado, compacto, expandido ---------- */
-.float-only, .pop-only, #floatIcon, #floatMini, #floatPin { display: none !important; }
-html.float .float-only, html.panel:is(.role-qa, .role-dev):not(.float) .pop-only { display: grid !important; }
+/* ---------- Janela flutuante (teste): minimizado e compacto ---------- */
+.float-only, .pop-only, #floatMini, #floatPin { display: none !important; }
+html.float .float-only, html.panel:not(.float) .pop-only { display: grid !important; }
 #btnLayout { display: none !important; }   /* modal grande sobre o Jira desativado por enquanto */
 html.float #btnDiscard, html.float #btnLayout, html.float #btnClose, html.float .zoom { display: none !important; }
 .top-actions .ic svg { width: 16px; height: 16px; display: block; }
 .ic.on { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
-.ic .g-shrink, .ic.is-full .g-grow { display: none; }
-.ic.is-full .g-shrink { display: inline; }
+.ic .g-shrink { display: none; }
 
 /* Canto da tela */
 html.float #floatPin { display: flex !important; }
-html.float[data-size="mini"] #floatPin, html.float[data-size="icon"] #floatPin { display: none !important; }
+html.float[data-size="mini"] #floatPin { display: none !important; }
 .float-pinbar { align-items: center; gap: 6px; margin: -10px 0 10px; padding: 7px 14px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12px; color: var(--muted); }
 .float-pinbar span { flex: 1; min-width: 0; }
 .float-pinbar .corner { width: 28px; height: 22px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; position: relative; padding: 0; }
@@ -1238,15 +1237,10 @@ html.float[data-size="mini"] #floatPin, html.float[data-size="icon"] #floatPin {
 .float-pinbar .corner.on { border-color: var(--accent); background: var(--accent-soft); }
 .float-pinbar .corner.on i { background: var(--accent); }
 
-/* Ícone e minimizado: só eles aparecem nesses tamanhos */
-html.float[data-size="mini"] .app > :not(#floatMini):not(#toast),
-html.float[data-size="icon"] .app > :not(#floatIcon) { display: none !important; }
+/* Minimizado: só ele aparece */
+html.float[data-size="mini"] .app > :not(#floatMini):not(#toast) { display: none !important; }
 html.float[data-size="mini"] #floatMini { display: flex !important; }
-html.float[data-size="icon"] #floatIcon { display: grid !important; }
-html.float[data-size="mini"] .app, html.float[data-size="icon"] .app { height: 100vh; }
-.float-icon { width: 100vw; height: 100vh; border: 0; padding: 0; background: var(--bg); place-items: center; cursor: pointer; }
-.float-icon img { width: 40px; height: 40px; border-radius: 10px; transition: transform .15s; }
-.float-icon:hover img { transform: scale(1.06); }
+html.float[data-size="mini"] .app { height: 100vh; }
 .float-mini { align-items: center; gap: 8px; height: 100vh; padding: 0 6px 0 12px; }
 .float-mini .ring { width: 38px; height: 38px; flex: none; }
 .fm-badge { min-width: 38px; height: 38px; padding: 0 6px; border-radius: 10px; display: grid; place-items: center; flex: none; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
@@ -1265,4 +1259,10 @@ html.float .app.float-in > * { animation: qfFloatIn .18s cubic-bezier(.2, .8, .2
 @media (prefers-reduced-motion: reduce) { html.float .app.float-in > * { animation: none; } }
 html.float .top-actions { gap: 2px; }
 html.float .top-actions .ic { width: 28px; height: 28px; }
-html.float[data-size="compact"] #btnOptions { display: none !important; }   /* Opções ficam no expandido */
+
+/* Telas estreitas (janela compacta ou painel fino): ferramentas quebram linha e destaques em 2 colunas */
+@media (max-width: 420px) {
+  .m-tools { flex-wrap: wrap; }
+  .m-tools > .grow { flex-basis: 100%; order: 9; }
+  .m-kpis, .m-kpis.four, .dm-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
