@@ -1,7 +1,8 @@
 /**
- * Histórico da demanda (teste, nos 4 perfis): modal com a linha do tempo horizontal do caminho
- * da demanda no quadro. Etapas em faixas (de cima para baixo), tempo da esquerda para a direita;
- * avanço = linha cheia na cor da etapa, volta = arco tracejado vermelho por cima ("voltou").
+ * Histórico da demanda (teste, nos 4 perfis): modal com a linha do tempo do caminho da demanda
+ * no quadro, em dois formatos (a escolha fica guardada):
+ *   horizontal — etapas em faixas, tempo da esquerda para a direita, volta = arco tracejado por cima;
+ *   vertical   — etapas em trilhos lado a lado, tempo de cima para baixo, volta = arco tracejado à direita.
  * Os dados vêm do changelog do Jira (ISSUE_HISTORY no serviço).
  */
 
@@ -12,6 +13,10 @@ const COLORS = {
   deploy: "#6cc3e0", qa: "#f5cd47", validated: "#7ee2b8", done: "#4bce97",
 };
 const CORE = ["todo", "doing", "feito", "deploy", "qa", "done"];
+const SHORT = { todo: "AF", doing: "EA", blocked: "IM", feito: "PR", deploy: "DP", qa: "VL", validated: "VD", done: "OK" };
+const LAYOUT_KEY = "qf.histLayout";
+const getLayout = () => { try { return localStorage.getItem(LAYOUT_KEY) === "v" ? "v" : "h"; } catch { return "h"; } };
+const setLayout = (v) => { try { localStorage.setItem(LAYOUT_KEY, v); } catch { /* sem storage */ } };
 const RET = "#f87168";
 const DOW = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
 const pad = (n) => String(n).padStart(2, "0");
@@ -91,7 +96,7 @@ function render(box, d, close) {
   const lanes = STAGES.filter((s) => CORE.includes(s.id) || used.has(s.id));
   const laneIdx = Object.fromEntries(lanes.map((s, i) => [s.id, i]));
   const color = (id) => COLORS[id] || "#94a3b4";
-  const state = { sel: nodes.length - 1, only: false };
+  const state = { sel: nodes.length - 1, only: false, layout: getLayout() };
 
   box.innerHTML = "";
   /* cabeçalho */
@@ -127,10 +132,14 @@ function render(box, d, close) {
   bar.setAttribute("role", "img"); bar.setAttribute("aria-label", "Tempo em cada etapa");
   top.append(bar, legend);
   const tools = h("div", "hist-tools");
+  const segL = h("span", "seg");
+  const bH = h("button", null, "Horizontal"), bV = h("button", null, "Vertical");
+  segL.append(bH, bV);
   const seg = h("span", "seg");
   const bAll = h("button", "on", "Tudo"), bRet = h("button", null, "Só as voltas");
   seg.append(bAll, bRet);
-  tools.append(seg, h("span", "grow"), h("span", "muted xs", "mais antigo à esquerda"));
+  const hint = h("span", "muted xs");
+  tools.append(segL, seg, h("span", "grow"), hint);
   top.appendChild(tools);
   box.appendChild(top);
 
@@ -188,7 +197,9 @@ function render(box, d, close) {
   });
   scroll.appendChild(g);
   chart.append(names, scroll);
-  body.appendChild(chart);
+  const hWrap = h("div", "hist-h");
+  hWrap.appendChild(chart);
+  body.appendChild(hWrap);
 
   /* detalhes da ação escolhida */
   const det = h("div", "hist-det");
@@ -199,7 +210,64 @@ function render(box, d, close) {
   dh.append(prev, dt, pos, next);
   const dw = h("span", "hist-det-w"), dn = h("span", "hist-det-n");
   det.append(dh, dw, dn);
-  body.appendChild(det);
+  hWrap.appendChild(det);
+
+  /* vertical: trilhos lado a lado, tempo de cima para baixo, o texto de cada ação ao lado */
+  const vWrap = h("div", "hist-v");
+  const VX0 = 13, VDX = 26, VROW = 60, VTOP = 30;
+  const vx = (id) => VX0 + (laneIdx[id] ?? 0) * VDX;
+  const VW = VX0 * 2 + (lanes.length - 1) * VDX;
+  const TEXT_X = VW + 58;
+  const VH = VTOP + (nodes.length - 1) * VROW + 34;
+  const vHead = h("div", "hist-vhead");
+  vHead.style.width = `${VW}px`;
+  lanes.forEach((s) => { const t = h("span", null, SHORT[s.id] || s.id.slice(0, 2).toUpperCase()); t.title = s.label; t.style.color = color(s.id); vHead.appendChild(t); });
+  const vArea = h("div", "hist-varea");
+  vArea.style.height = `${VH}px`;
+  const vg = svg("svg", { width: TEXT_X, height: VH, viewBox: `0 0 ${TEXT_X} ${VH}`, "aria-hidden": "true" });
+  lanes.forEach((s) => vg.appendChild(svg("line", { x1: vx(s.id), y1: 0, x2: vx(s.id), y2: VH, stroke: color(s.id), "stroke-opacity": ".14", "stroke-width": 2 })));
+  const vpts = nodes.map((n, i) => ({ x: vx(n.stage), y: VTOP + i * VROW }));
+  const vLinks = [], vDots = [], vRows = [], vLabels = [];
+  for (let i = 1; i < nodes.length; i++) {
+    const a = vpts[i - 1], b = vpts[i], back = nodes[i].back;
+    let dPath;
+    if (back) {
+      const bulge = Math.max(a.x, b.x) + 34 + Math.abs(a.x - b.x) * 0.15;
+      dPath = `M${a.x} ${a.y} C${bulge} ${a.y + 4} ${bulge} ${b.y - 4} ${b.x} ${b.y}`;
+      const t = svg("text", { x: bulge - 4, y: (a.y + b.y) / 2 + 4, "font-size": 10.5, "font-weight": 700, fill: RET, "text-anchor": "middle" });
+      t.textContent = "voltou";
+      vg.appendChild(t);
+      vLabels.push([i, t]);
+    } else if (a.x === b.x) dPath = `M${a.x} ${a.y} L${b.x} ${b.y}`;
+    else dPath = `M${a.x} ${a.y} C${a.x} ${a.y + VROW * 0.55} ${b.x} ${b.y - VROW * 0.55} ${b.x} ${b.y}`;
+    const path = svg("path", { d: dPath, fill: "none", stroke: back ? RET : color(nodes[i].stage), "stroke-width": back ? 2 : 2.5, "stroke-linecap": "round", ...(back ? { "stroke-dasharray": "5 5" } : {}) });
+    if (!back) path.classList.add("hist-flow");
+    vg.appendChild(path);
+    vLinks.push([i, path]);
+  }
+  nodes.forEach((n, i) => {
+    const p = vpts[i];
+    const c = svg("circle", { cx: p.x, cy: p.y, r: 5, fill: "#1b1f23", stroke: n.back ? RET : color(n.stage), "stroke-width": 2.5 });
+    c.classList.add("hist-dot");
+    vg.appendChild(c);
+    vDots.push({ c, n, i });
+    const row = h("div", "hist-vrow");
+    row.style.top = `${p.y - 27}px`;
+    row.style.left = `${TEXT_X}px`;
+    const prevN = nodes[i - 1], last = i === nodes.length - 1;
+    const t = h("span", "t", n.title + (last ? " · agora" : ""));
+    if (n.back) t.style.color = RET;
+    const w = h("span", "w", `${day(n.at)} ${hour(n.at)} · ${n.by || "—"}${prevN ? ` · ficou ${dur(n.at - prevN.at)} em ${prevN.status || label(prevN.stage)}` : ""}`);
+    const note = h("span", `n${n.note ? "" : " muted"}`, n.note ? `“${n.note}”` : last ? `há ${dur(d.now - n.at)} em ${n.status || label(n.stage)}` : "");
+    row.append(t, w, note);
+    if (n.back) row.classList.add("back");
+    row.addEventListener("click", () => { state.sel = i; paint(); });
+    vArea.appendChild(row);
+    vRows.push(row);
+  });
+  vArea.prepend(vg);
+  vWrap.append(vHead, vArea);
+  body.appendChild(vWrap);
   box.appendChild(body);
 
   const shown = (i) => !state.only || nodes[i].back || (i + 1 < nodes.length && nodes[i + 1].back) || i === 0;
@@ -216,6 +284,21 @@ function render(box, d, close) {
     });
     linkEls.forEach(([j, path]) => { path.style.opacity = state.only && !nodes[j].back ? 0.2 : 1; });
     labelEls.forEach(([j, t]) => { t.style.opacity = shown(j) ? 1 : 0.25; });
+    // vertical
+    vDots.forEach(({ c, n: m, i: j }) => {
+      const on = j === i, isLast = j === nodes.length - 1;
+      c.setAttribute("r", on ? 7 : isLast ? 7 : m.back ? 6 : 5);
+      c.setAttribute("fill", on || isLast ? color(m.stage) : "#1b1f23");
+      c.style.opacity = shown(j) ? 1 : 0.25;
+    });
+    vLinks.forEach(([j, path]) => { path.style.opacity = state.only && !nodes[j].back ? 0.2 : 1; });
+    vLabels.forEach(([j, t]) => { t.style.opacity = shown(j) ? 1 : 0.25; });
+    vRows.forEach((r, j) => { r.style.opacity = shown(j) ? 1 : 0.3; r.classList.toggle("sel", j === i); });
+    // formato
+    const horiz = state.layout === "h";
+    hWrap.hidden = !horiz; vWrap.hidden = horiz;
+    bH.classList.toggle("on", horiz); bV.classList.toggle("on", !horiz);
+    hint.textContent = horiz ? "mais antigo à esquerda" : "mais antigo em cima";
     dt.textContent = n.title + (last ? " · agora" : "");
     dt.style.color = n.back ? RET : "";
     pos.textContent = `${i + 1} de ${nodes.length}`;
@@ -231,6 +314,8 @@ function render(box, d, close) {
     const x = pts[state.sel].x;
     if (x < scroll.scrollLeft + 20 || x > scroll.scrollLeft + scroll.clientWidth - 20) scroll.scrollTo({ left: x - scroll.clientWidth / 2, behavior: "smooth" });
   };
+  bH.addEventListener("click", () => { state.layout = "h"; setLayout("h"); paint(); requestAnimationFrame(keepVisible); });
+  bV.addEventListener("click", () => { state.layout = "v"; setLayout("v"); paint(); });
   bAll.addEventListener("click", () => { state.only = false; bAll.classList.add("on"); bRet.classList.remove("on"); paint(); });
   bRet.addEventListener("click", () => { state.only = true; bRet.classList.add("on"); bAll.classList.remove("on"); paint(); });
   paint();

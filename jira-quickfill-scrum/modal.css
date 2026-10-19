@@ -1361,3 +1361,17 @@ html.float .top-actions .ic { width: 28px; height: 28px; }
 .hist-flow { stroke-dasharray: 400; animation: histDraw .5s cubic-bezier(.2, .8, .2, 1); }
 .hist-dot { transform-box: fill-box; transform-origin: center; animation: histPop .25s cubic-bezier(.2, .8, .2, 1); }
 @media (prefers-reduced-motion: reduce) { .hist-flow, .hist-dot, .hist-box { animation: none; } .hist-flow { stroke-dasharray: none; } }
+.hist-tools { flex-wrap: wrap; }
+.hist-h[hidden], .hist-v[hidden] { display: none !important; }
+.hist-h { display: flex; flex-direction: column; gap: 10px; }
+.hist-vhead { display: flex; margin: 0 0 4px; }
+.hist-vhead span { width: 26px; text-align: center; font-size: 10.5px; font-weight: 700; }
+.hist-varea { position: relative; }
+.hist-varea svg { position: absolute; left: 0; top: 0; overflow: visible; }
+.hist-vrow { position: absolute; right: 0; height: 54px; display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 0 8px; border-radius: 8px; cursor: pointer; min-width: 0; }
+.hist-vrow:hover, .hist-vrow.sel { background: rgba(255, 255, 255, .04); }
+.hist-vrow.back { box-shadow: inset 3px 0 0 var(--err); }
+.hist-vrow .t { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-vrow .w { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.hist-vrow .n { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-vrow .n.muted { color: var(--muted); }
