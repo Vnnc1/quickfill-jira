@@ -393,6 +393,41 @@ function todayLocal() {
   return `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(n.getDate())}`;
 }
 
+/** Data de início desejada: o Dia escolhido, salvo se a tarefa já começou antes dele. */
+function wantedStart(p) {
+  if (!p.startDate || !p.startFieldId) return null;
+  const cur = String(p.currentStartDate || "").slice(0, 10);
+  return cur && cur < p.startDate ? cur : p.startDate;
+}
+
+/** Relê a Data de início depois das automações e regrava se o Jira trocou. */
+async function keepStartDate(key, fieldId, wanted, value, cfg) {
+  const read = async () => {
+    const r = await jira(`/rest/api/3/issue/${encodeURIComponent(key)}?fields=${fieldId}`, { cfg });
+    const v = r.fields?.[fieldId];
+    return typeof v === "string" ? v.slice(0, 10) : null;
+  };
+  let rewrote = false;
+  try {
+    for (const wait of [2500, 4000]) {
+      await new Promise((r) => setTimeout(r, wait));
+      const now = await read();
+      if (now === wanted) break;
+      await jira(`/rest/api/3/issue/${encodeURIComponent(key)}`, { method: "PUT", body: { fields: { [fieldId]: value } }, cfg });
+      rewrote = now || "vazio";
+    }
+    if (!rewrote) return null;
+    const final = await read();
+    return final === wanted
+      ? { ok: true, detail: `mantida em ${brDay(wanted)} (o Jira tinha trocado para ${rewrote === "vazio" ? rewrote : brDay(rewrote)})` }
+      : { ok: false, detail: `o Jira continua trocando para ${final ? brDay(final) : "vazio"} — confira a automação do quadro` };
+  } catch (e) {
+    return { ok: false, detail: `não deu para conferir: ${e.message}` };
+  }
+}
+
+const brDay = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+
 /**
  * Aplica tudo na subtarefa. Cada etapa é independente e reportada
  * separadamente — assim uma falha de permissão não esconde o que deu certo.
@@ -410,13 +445,14 @@ async function applyToSubtask(payload) {
   /* 1. Campos de data + estimativa original (uma única chamada) */
   const fields = {};
   if (payload.dueDate) fields.duedate = payload.dueDate;
-  // "Data de início" da tarefa = primeiro dia de trabalho: só grava se ainda estiver vazia.
+  // "Data de início" da tarefa = primeiro dia de trabalho: grava se estiver vazia ou se o Dia for anterior.
   // O dia escolhido no modal continua valendo para o apontamento (worklog).
-  if (payload.startDate && payload.startFieldId && !payload.currentStartDate) {
-    fields[payload.startFieldId] =
-      payload.startFieldType === "datetime"
-        ? toJiraLocal(payload.startDate, parseHM(payload.startTime, DEFAULT_WORKDAY.start))
-        : payload.startDate;
+  const startWanted = wantedStart(payload);
+  const startValue = startWanted && (payload.startFieldType === "datetime"
+    ? toJiraLocal(startWanted, parseHM(payload.startTime, DEFAULT_WORKDAY.start))
+    : startWanted);
+  if (startWanted && startWanted !== String(payload.currentStartDate || "").slice(0, 10)) {
+    fields[payload.startFieldId] = startValue;
   }
   if (est.jira) fields.timetracking = { originalEstimate: est.jira };
 
@@ -510,6 +546,13 @@ async function applyToSubtask(payload) {
     } catch (e) {
       steps.push({ step: "Status", ok: false, detail: e.message });
     }
+  }
+
+  /* 4. Automações do Jira (ex.: "iniciar" grava a data de hoje no início) podem sobrescrever
+   *    a Data de início logo depois. Confere e, se mudou, grava de novo o Dia escolhido. */
+  if (startWanted && (payload.transitionId || chunks.length)) {
+    const fixed = await keepStartDate(key, payload.startFieldId, startWanted, startValue, cfg);
+    if (fixed) steps.push({ step: "Data de início", ok: fixed.ok, detail: fixed.detail });
   }
 
   if (!steps.length) throw new Error("Nada para aplicar — preencha ao menos um campo.");

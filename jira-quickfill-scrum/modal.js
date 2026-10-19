@@ -427,7 +427,20 @@ function updateEstimateMatch() {
   } else el.textContent = "";
 }
 
+/** O que acontece com a "Data de início" da tarefa com o Dia escolhido. */
+function updateStartHint() {
+  const ctx = !isSpace(state.mode) ? state.selected : null;
+  if (!ctx) return;
+  const day = $("startDate").value;
+  const cur = (ctx.current.startDate || "").slice(0, 10);
+  $("curStart").textContent = !ctx.startField ? "só no apontamento"
+    : !cur ? "também vira a data de início da tarefa"
+    : day && day < cur ? `data de início vai de ${brDate(cur)} para ${brDate(day)}`
+    : `início da tarefa: ${brDate(cur)} (mantido)`;
+}
+
 function refreshPreviews() {
+  updateStartHint();
   updatePreview("estimate", "prevEstimate");
   updatePreview("spent", "prevSpent");
   updateEstimateMatch();
@@ -668,8 +681,7 @@ function applySingleContext(ctx, override = null, { keepValues = false } = {}) {
   $("targetLine").append(b, sum, jiraLink(ctx.key, { label: "Abrir no Jira" }));
 
   $("curDue").textContent = ctx.current.dueDate ? `atual ${brDate(ctx.current.dueDate)}` : "";
-  $("curStart").textContent = !ctx.startField ? "só no apontamento"
-    : ctx.current.startDate ? `início da tarefa: ${brDate(ctx.current.startDate)} (mantido)` : "também vira a data de início da tarefa";
+  updateStartHint();
   $("curStatus").textContent = `atual: ${ctx.status}`;
 
   const sel = $("statusSel");
@@ -2784,6 +2796,8 @@ async function applySingle() {
     if (added) ctx.current.timeSpent = fmtDur((parseDuration(ctx.current.timeSpent).minutes || 0) + added);
     const wrote = (res.steps || []).find((s) => s.step === "Campos" && s.ok)?.detail?.match(/estimativa ([\dhmdw ]+)/);
     if (wrote) ctx.current.originalEstimate = wrote[1].trim();
+    const curStart = (ctx.current.startDate || "").slice(0, 10);
+    if (ctx.startField && payload.startDate && (!curStart || payload.startDate < curStart)) ctx.current.startDate = payload.startDate;
     state.lastResult = { kind: "single", data: res };
     renderSingleResult(res);
     toast(res.ok ? `${res.key} atualizada.` : `${res.key}: algumas etapas falharam.`, res.ok ? "ok" : "err");
@@ -5696,7 +5710,7 @@ $("btnReset").addEventListener("click", () => { setFormValues(blankForm()); refr
 
 $("estimate").addEventListener("input", () => { updatePreview("estimate", "prevEstimate"); updateEstimateMatch(); });
 $("spent").addEventListener("input", () => { updatePreview("spent", "prevSpent"); updateEstimateMatch(); updateTimeHint(); refreshWorkday(); });
-$("startDate").addEventListener("change", () => { updateTimeHint(); refreshWorkday(); });
+$("startDate").addEventListener("change", () => { updateTimeHint(); refreshWorkday(); updateStartHint(); });
 $("startTime").addEventListener("input", () => {
   if (!$("startTime").value || $("startTime").value === state.echo.start) return;   // eco do cálculo
   state.startAnchor = hmToMin($("startTime").value);
