@@ -1,29 +1,29 @@
 {
-  "version": "4.5.1",
+  "version": "4.6.0",
   "private": false,
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "installCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/quickfill.ps1 | iex\"",
   "guide": "https://github.com/Vnnc1/quickfill-jira#readme",
   "date": "2026-10-19",
-  "notes": "Correção: a Data de início agora fica com o Dia escolhido no apontamento. Antes, a automação do Jira ao iniciar a demanda trocava pela data de hoje. A Data limite continua independente.",
+  "notes": "Reuniões na linha do tempo: arraste a bolinha + até o horário para marcar daily, alinhamento ou reunião; contam na meta do dia e alinhamentos/reuniões podem virar demanda no Jira. Histórico em Opções › Reuniões e alinhamentos. O QA abre em Meu dia. No SCRUM, Feito/PR e os riscos seguem o quadro (só cards) e o filtro de Espaço vale para os itens.",
   "packages": {
     "qa": {
-      "version": "4.5.1",
+      "version": "4.6.0",
       "folder": "jira-quickfill-qa",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-qa.zip"
     },
     "dev": {
-      "version": "4.5.1",
+      "version": "4.6.0",
       "folder": "jira-quickfill-dev",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-dev.zip"
     },
     "scrum": {
-      "version": "4.5.1",
+      "version": "4.6.0",
       "folder": "jira-quickfill-scrum",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-scrum.zip"
     },
     "design": {
-      "version": "4.5.1",
+      "version": "4.6.0",
       "folder": "jira-quickfill-design",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-design.zip"
     }
