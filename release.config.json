@@ -1,6 +1,6 @@
 {
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "branch": "master",
-  "notes": "Janela flutuante: na barra lateral, clique em \"Soltar como janela\" para usar o QuickFill fora do Chrome. O alfinete fixa a janela por cima de outros programas, com tamanho minimizado ou compacto (ajuste pelas bordas). O modal grande sobre o Jira saiu por enquanto: tudo abre na barra lateral.",
+  "notes": "Correção: a Data de início agora fica com o Dia escolhido no apontamento. Antes, a automação do Jira ao iniciar a demanda trocava pela data de hoje. A Data limite continua independente.",
   "private": false
 }
