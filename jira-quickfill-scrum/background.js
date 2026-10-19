@@ -2638,6 +2638,72 @@ async function relatesLinkType(cfg) {
  * listados na descrição, vinculados ("relacionado a") e, se pedido, na sprint ativa.
  */
 /**
+ * Histórico de uma demanda para o modal "Histórico": cada mudança de status (de onde, para onde,
+ * quando e quem), a etapa do quadro de cada status (pelas colunas configuradas no quadro do espaço)
+ * e, nas voltas, o comentário feito na hora como motivo.
+ */
+async function issueHistory(p = {}) {
+  const cfg = await getConfig();
+  const key = normalizeKey(p.key);
+  if (!key) throw new Error("Demanda não informada.");
+  const [meta, issue] = await Promise.all([
+    statusMeta(cfg),
+    jira(`/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,status,issuetype,created,reporter,creator,parent,project,priority,assignee`, { cfg }),
+  ]);
+  const f = issue.fields || {};
+  const values = [];
+  for (let startAt = 0; startAt < 2000;) {
+    const page = await jira(`/rest/api/3/issue/${encodeURIComponent(key)}/changelog?startAt=${startAt}&maxResults=100`, { cfg });
+    const batch = page?.values || page?.histories || [];
+    values.push(...batch);
+    startAt += batch.length;
+    if (!batch.length || page.isLast || startAt >= (page.total ?? startAt)) break;
+  }
+  let comments = [];
+  try {
+    const c = await jira(`/rest/api/3/issue/${encodeURIComponent(key)}/comment?maxResults=100&orderBy=created`, { cfg });
+    comments = (c?.comments || []).map((x) => ({ at: Date.parse(x.created), by: x.author?.accountId || "", text: adfExcerpt(x.body, 220) }));
+  } catch { /* sem comentários */ }
+
+  const spaces = await qaSpaces(cfg, meta).catch(() => []);
+  const kinds = spaces.find((sp) => sp.project === f.project?.key)?.kinds || {};
+  const R = stageRules(cfg);
+  const stageOfStatus = (id, name) => {
+    const cat = meta[String(id)]?.cat || "indeterminate";
+    const kind = kinds[String(id)]?.kind || (cat === "done" ? "done" : columnKind(name || meta[String(id)]?.name || "", R));
+    return stageFrom(kind, cat);
+  };
+
+  const transitions = [];
+  for (const h of values) {
+    for (const it of h.items || []) {
+      if (it.field !== "status" && it.fieldId !== "status") continue;
+      const at = Date.parse(h.created);
+      const by = h.author?.accountId || "";
+      // motivo: comentário da mesma pessoa até 2h depois (ou 15 min antes) da mudança
+      const note = comments.find((c) => c.by === by && c.at >= at - 15 * 60000 && c.at <= at + 2 * 3600000)?.text || "";
+      transitions.push({
+        at, by, byName: h.author?.displayName || "",
+        from: String(it.from || ""), fromName: it.fromString || "", to: String(it.to || ""), toName: it.toString || "",
+        fromStage: stageOfStatus(it.from, it.fromString), toStage: stageOfStatus(it.to, it.toString), note,
+      });
+    }
+  }
+  transitions.sort((a, b) => a.at - b.at);
+  const first = transitions[0];
+  const st = f.status || {};
+  return {
+    key, url: `${cfg.baseUrl}/browse/${key}`, summary: f.summary || "", type: f.issuetype?.name || "",
+    isSubtask: !!f.issuetype?.subtask, parentKey: f.parent?.key || null, priority: f.priority?.name || "",
+    assignee: f.assignee?.displayName || "",
+    created: Date.parse(f.created), createdBy: (f.creator || f.reporter)?.displayName || "",
+    createdStatus: first ? first.fromName : st.name || "", createdStage: first ? first.fromStage : stageOfStatus(st.id, st.name),
+    status: { name: st.name || "", stage: stageOfStatus(st.id, st.name) },
+    transitions, now: Date.now(),
+  };
+}
+
+/**
  * Reunião/alinhamento marcado na linha do tempo → cria uma Tarefa no Jira atribuída a você
  * e aplica datas, story points, status e o tempo da reunião como apontamento (mesmo fluxo do QA).
  */
@@ -2913,6 +2979,7 @@ const HANDLERS = {
   SAVE_SCRUM_SETTINGS: (p) => saveScrumSettings(p),
   CREATE_DEPLOY_CARD: (p) => createDeployCard(p),
   CREATE_MEETING_ISSUE: (p) => createMeetingIssue(p),
+  ISSUE_HISTORY: (p) => issueHistory(p),
   QA_QUEUE: (p) => qaQueue(p),
   POST_EVIDENCE: (p) => postEvidence(p),
   HANDOFF_GET: (p) => handoffGet(p),

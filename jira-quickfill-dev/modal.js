@@ -4,6 +4,7 @@ import { ROLE, INSTALL_CMD } from "./lib/role.js";
 import { loadAccent } from "./lib/theme.js";
 import { initFloat, popOutFromPanel } from "./lib/float.js";
 import { loadMeetings, onMeetingsChange, meetingMinutes, attachMeetings, meetingsCard, setMeetingApi } from "./lib/meetings.js";
+import { historyButton, setHistoryApi } from "./lib/history.js";
 import { addDaysIso, isWeekendIso, DAY_MS } from "./lib/dates.js";
 import { totalOf, byIssue, streakAt, averageBefore, averageUntil, periodStats, weekCompare, countedDays, demandBoard, deployLabel, feitoLabel, DEMAND_GROUPS } from "./lib/devstats.js";
 import { STAGES, RISKS, DESIGN_STAGES, HANDOFF_ITEMS, TYPE_LABEL, stageOf, typeGroup, normName, sprintHealth, sprintTree, peopleLoad,
@@ -652,7 +653,7 @@ function renderSubtasks() {
       b.querySelector(".k").after(tag);
       b.title = "Aplicar horas, datas, pontos e status na própria tarefa pai";
     }
-    b.appendChild(jiraLink(s.key, { label: "" }));
+    b.append(historyButton(s.key), jiraLink(s.key, { label: "" }));
     b.addEventListener("click", () => selectSubtask(s.key));
     box.appendChild(b);
   }
@@ -988,7 +989,7 @@ function renderBoardList() {
     row.querySelector(".k").textContent = i.key;
     row.querySelector(".s").textContent = i.summary;
     row.querySelector(".st").textContent = i.assignee || "sem responsável";
-    row.appendChild(jiraLink(i.key, { label: "" }));
+    row.append(historyButton(i.key), jiraLink(i.key, { label: "" }));
     box.appendChild(row);
   }
   updateBoardCount();
@@ -1079,7 +1080,7 @@ function renderBatchList() {
     row.querySelector(".s").textContent = t.summary;
     row.querySelector(".st").textContent = t.status;
     row.title = t.assigneeName ? `Responsável: ${t.assigneeName}` : "Sem responsável";
-    row.appendChild(jiraLink(t.key, { label: "" }));
+    row.append(historyButton(t.key), jiraLink(t.key, { label: "" }));
     box.appendChild(row);
   }
   updateBatchCount();
@@ -1865,7 +1866,7 @@ function dashRow(it, d) {
 
   const side = document.createElement("div");
   side.className = "dr-side";
-  side.appendChild(jiraLink(it.key, { base: d.url || DEF.baseUrl, label: "Jira" }));
+  side.append(historyButton(it.key), jiraLink(it.key, { base: d.url || DEF.baseUrl, label: "Jira" }));
   if (it.estimate || it.spent) {
     const bar = document.createElement("div");
     bar.className = "mini-bar";
@@ -2739,6 +2740,7 @@ function rerenderMeetings(item) {
   if (state.mode === "single") refreshPreviews();
   refreshDayPill(fromJira);
 }
+setHistoryApi({ send, open: openIssue });
 if (MTG_ON) { setMeetingApi({ send }); loadMeetings().then(() => rerenderMeetings()); onMeetingsChange(() => rerenderMeetings()); }
 
 function updateDayPill(total, goal) {
@@ -3117,7 +3119,7 @@ function issueLine(issue, right, sub, base = DEF.baseUrl) {
   if (sub) main.appendChild(el("div", "m-row-sub", sub));
   r.append(main);
   if (right != null) r.appendChild(typeof right === "string" ? el("span", "m-row-r", right) : right);
-  r.appendChild(jiraLink(issue.key, { base, label: "" }));
+  r.append(historyButton(issue.key), jiraLink(issue.key, { base, label: "" }));
   return r;
 }
 
@@ -4695,7 +4697,7 @@ function taskRow(i, { meta = "", actions = [] } = {}) {
   const foot = el("div", "tr-foot");
   foot.append(el("span", "tr-meta", meta));
   const act = el("span", "tr-actions");
-  act.append(...actions, jiraLink(i.key, { base: SC.data?.url, label: "" }));
+  act.append(...actions, historyButton(i.key), jiraLink(i.key, { base: SC.data?.url, label: "" }));
   foot.appendChild(act);
   r.appendChild(foot);
   return r;
