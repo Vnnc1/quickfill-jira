@@ -4162,11 +4162,22 @@ const scSettings = () => SC.data?.settings || {};
 const isHighPrio = (p) => ["p1", "p2"].includes(prioTone(p));
 
 /** Sprints ativas dentro do espaço escolhido (Todos · MEED · SUS). */
-function scSprints() {
+/**
+ * Sprints visíveis com o Espaço escolhido.
+ * `cross`: em Pessoas e Riscos, os itens do projeto escolhido que estão na sprint de outro quadro
+ * também entram (ex.: SUS-2368 na sprint do MEED aparece em "SUS").
+ */
+function scSprints({ cross = false } = {}) {
   const out = [];
   for (const sp of SC.data?.spaces || []) {
-    if (gspace.project && sp.project !== gspace.project) continue;
-    for (const s of sp.sprints || []) out.push({ space: sp, sprint: s });
+    if (gspace.project && sp.project !== gspace.project && !cross) continue;
+    for (const s of sp.sprints || []) {
+      // Espaço escolhido = só os itens daquele projeto: a sprint de um quadro pode trazer cards de
+      // outro projeto (ex.: SUS-2368 na sprint do MEED), que não devem aparecer com "MEED" selecionado.
+      const sprint = gspace.project ? { ...s, issues: (s.issues || []).filter((i) => (i.project || i.key.split("-")[0]) === gspace.project) } : s;
+      if (sp.project !== gspace.project && gspace.project && !sprint.issues.length) continue;
+      out.push({ space: sp, sprint });
+    }
   }
   return out;
 }
@@ -4788,7 +4799,7 @@ async function openDeployForm(sp, sprint, feito, draft = null) {
 function renderPeople() {
   const box = $("peopleBox");
   box.innerHTML = "";
-  const list = scSprints();
+  const list = scSprints({ cross: true });
   if (!list.length) return scEmpty(box);
   const issues = list.flatMap((x) => x.sprint.issues);
   const fromMs = SC.period === "sprint" ? 0 : scFrom(null);
@@ -4923,7 +4934,7 @@ function renderPeople() {
 /* ---------- Riscos ---------- */
 
 function scRisks() {
-  return scSprints().map(({ space: sp, sprint: s }) => ({ sp, s,
+  return scSprints({ cross: true }).map(({ space: sp, sprint: s }) => ({ sp, s,
     r: sprintRisks(s, { staleDays: scSettings().staleDays, today: SC.data.today, isHigh: isHighPrio, fromMs: scFrom(s), qaPeople: scSettings().qaPeople || [] }) }));
 }
 
