@@ -219,6 +219,7 @@ function toast(msg, kind = "err") {
 $("toast").addEventListener("click", () => toast(null));
 
 const busy = (on) => $("app").classList.toggle("loading", on);
+const BOOT = { done: false };   // a tela salva já voltou (a janela flutuante espera por isso)
 
 /* =====================================================================
    Abas
@@ -5632,7 +5633,7 @@ $("btnLayout").addEventListener("click", async () => {
 {
   $("btnPop")?.addEventListener("click", () => popOutFromPanel({ saveView, toast }));
   initFloat({
-    mode: () => state.mode, toast, saveView, fmt: fmtDur, dayShort, today: todayISO,
+    mode: () => state.mode, booting: () => !BOOT.done, toast, saveView, fmt: fmtDur, dayShort, today: todayISO,
     day: () => (state.mode === "day" ? state.dayView : state.mode === "today" ? DV.view : null),
   });
 }
@@ -5901,4 +5902,4 @@ chrome.runtime.onMessage.addListener((msg) => {
     const m = tab?.url?.match(/\/browse\/([A-Z][A-Z0-9_]*-\d+)/i) || tab?.url?.match(/selectedIssue=([A-Z][A-Z0-9_]*-\d+)/i);
     if (m) { $("parentKey").value = m[1].toUpperCase(); findSubtasks(); }
   } catch { /* sem permissão de aba */ }
-})();
+})().finally(() => { BOOT.done = true; });

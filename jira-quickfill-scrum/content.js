@@ -55,28 +55,6 @@ function toggle() {
   document.getElementById(HOST_ID) ? close() : open();
 }
 
-/** Botão flutuante: abre no painel lateral (padrão) ou no modal grande, conforme as Opções. */
-function launch() {
-  if (document.getElementById(HOST_ID)) return close();
-  try {
-    chrome.runtime.sendMessage({ type: "QUICKFILL_LAUNCH" }, (res) => {
-      if (chrome.runtime.lastError || !res?.ok || !res.data?.panel) open();
-    });
-  } catch { open(); }
-}
-
-/* Botão flutuante discreto — some quando o modal está aberto */
-function mountLauncher() {
-  if (document.getElementById("jqf-launcher-scrum")) return;
-  const btn = document.createElement("button");
-  btn.id = "jqf-launcher-scrum";
-  btn.className = "jqf-launcher jqf-scrum";
-  btn.title = "Jira QuickFill SCRUM (Ctrl+Shift+K)";
-  btn.textContent = "SM";
-  btn.addEventListener("click", launch);
-  document.documentElement.appendChild(btn);
-}
-
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "QUICKFILL_TOGGLE") toggle();
   if (msg?.type === "QUICKFILL_OPEN_MODAL") open();
@@ -101,4 +79,6 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") close();
 });
 
-mountLauncher();
+/* Os botões no canto do Jira saíram: o QuickFill abre pelo ícone da extensão ou pelo atalho.
+   Tira os que ficaram de uma versão anterior nesta aba. */
+document.querySelectorAll(".jqf-launcher").forEach((b) => b.remove());

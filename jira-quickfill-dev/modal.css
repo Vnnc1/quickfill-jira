@@ -1375,3 +1375,11 @@ html.float .top-actions .ic { width: 28px; height: 28px; }
 .hist-vrow .w { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .hist-vrow .n { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hist-vrow .n.muted { color: var(--muted); }
+
+/* Janela flutuante abrindo: último resumo com indicador, até os dados chegarem */
+@keyframes fmSpin { to { transform: rotate(360deg); } }
+@keyframes fmPulse { 50% { opacity: .55; } }
+.float-mini.loading .ring { animation: fmSpin .9s linear infinite; }
+.float-mini.loading #fmRing { stroke-dashoffset: 70 !important; }
+.float-mini.loading .fm-badge, .float-mini.loading .fm-txt { animation: fmPulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .float-mini.loading .ring, .float-mini.loading .fm-badge, .float-mini.loading .fm-txt { animation: none; } }

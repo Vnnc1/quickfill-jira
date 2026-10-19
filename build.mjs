@@ -26,7 +26,7 @@ const ROLES = {
     title: "Jira QuickFill QA",
     description: "QA: preenche datas, estimativa, apontamento e status de subtarefas (Testes Manuais), em uma tarefa ou em lote, com painel, equipe e meu dia.",
     key: "J", hint: "Abrir o modal do Jira QuickFill na aba atual",
-    launcher: { text: "⏱", bottom: 18, color: "#579dff" }, frame: [520, 700],
+    frame: [520, 700],
   },
   dev: {
     dir: "jira-quickfill-dev",
@@ -34,7 +34,7 @@ const ROLES = {
     title: "Jira QuickFill DEV",
     description: "DEV: seu dia e seu progresso no Jira — meta do dia, sequência, histórico, suas demandas (com o QA, voltaram, entregues) e a equipe.",
     key: "Y", hint: "Abrir o QuickFill DEV na aba atual",
-    launcher: { text: "DEV", bottom: 66, color: "#4bce97" }, frame: [600, 760],
+    frame: [600, 760],
   },
   scrum: {
     dir: "jira-quickfill-scrum",
@@ -42,7 +42,7 @@ const ROLES = {
     title: "Jira QuickFill SCRUM",
     description: "SCRUM: saúde da sprint (burndown, previsão, velocidade), quem está com o quê, riscos (impedidas, paradas, fila do QA) e a equipe ao vivo.",
     key: "K", hint: "Abrir o QuickFill SCRUM na aba atual",
-    launcher: { text: "SM", bottom: 114, color: "#f5cd47" }, frame: [600, 760],
+    frame: [600, 760],
   },
   design: {
     dir: "jira-quickfill-design",
@@ -50,7 +50,7 @@ const ROLES = {
     title: "Jira QuickFill DESIGN",
     description: "DESIGN: suas HUs por etapa (fila, em design, revisão, com o dev), quem está aguardando design, meta semanal de entregas, seu dia e a equipe.",
     key: "E", hint: "Abrir o QuickFill DESIGN na aba atual",
-    launcher: { text: "UX", bottom: 162, color: "#e774bb" }, frame: [600, 760],
+    frame: [600, 760],
   },
 };
 
@@ -125,22 +125,12 @@ function contentJs(role, r) {
   const swap = (a, b) => { if (!s.includes(a)) throw new Error(`content.js: trecho não encontrado: ${a}`); s = s.split(a).join(b); };
   swap(`const HOST_ID = "jira-quickfill-host";`, `const HOST_ID = "jira-quickfill${suffix}-host";`);
   swap(`frame.className = "jqf-frame";`, `frame.className = "jqf-frame jqf-frame-${role}";`);
-  swap(`"jqf-launcher")) return;`, `"jqf-launcher${suffix}")) return;`);
-  swap(`btn.id = "jqf-launcher";`, `btn.id = "jqf-launcher${suffix}";`);
-  swap(`btn.className = "jqf-launcher";`, `btn.className = "jqf-launcher jqf-${role}";`);
-  swap(`btn.title = "Jira QuickFill QA (Ctrl+Shift+J)";`, `btn.title = "${r.title} (Ctrl+Shift+${r.key})";`);
-  swap(`btn.textContent = "⏱";`, `btn.textContent = "${r.launcher.text}";`);
   return s;
 }
 
 function contentCss(role, r) {
   const base = readFileSync(join(SRC, "content.css"), "utf8").replace(/\n\/\* QuickFill [\s\S]*$/, "\n");
-  if (role === "qa") return base;
-  return `${base.trimEnd()}
-
-/* QuickFill ${role.toUpperCase()}: botão empilhado acima dos outros perfis */
-.jqf-launcher.jqf-${role} { bottom: ${r.launcher.bottom}px; font-size: 10px; font-weight: 800; letter-spacing: .02em; color: ${r.launcher.color}; }
-`;
+  return base;
 }
 
 const shared = listFiles(SRC).filter((f) => !PER_ROLE.has(f));
