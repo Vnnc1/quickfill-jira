@@ -2637,6 +2637,65 @@ async function relatesLinkType(cfg) {
  * Cria o card "Realizando Deploy" para quem faz o deploy, com os cards que estão em Feito
  * listados na descrição, vinculados ("relacionado a") e, se pedido, na sprint ativa.
  */
+/**
+ * Reunião/alinhamento marcado na linha do tempo → cria uma Tarefa no Jira atribuída a você
+ * e aplica datas, story points, status e o tempo da reunião como apontamento (mesmo fluxo do QA).
+ */
+async function createMeetingIssue(p = {}) {
+  const cfg = await getConfig();
+  const project = String(p.project || cfg.defaultProject || "").toUpperCase();
+  if (!project) throw new Error("Defina o projeto padrão nas Opções para criar a demanda.");
+  const summary = String(p.title || "").trim() || "Reunião";
+  const minutes = Math.max(0, Math.round((p.end ?? 0) - (p.start ?? 0)));
+  const type = await issueTypeByName(project, "Tarefa", cfg);
+  if (!type) throw new Error(`Não encontrei um tipo de issue para criar em ${project}.`);
+  const me = await getMyself(cfg);
+  const description = adfDoc(
+    ...adfLines(p.desc),
+    adfPara(adfText(`Marcado no QuickFill: ${p.date} das ${fmtHM(p.start)} às ${fmtHM(p.end)}.`, [{ type: "em" }])),
+  );
+  const fields = { project: { key: project }, issuetype: { id: type.id }, summary, description };
+  const steps = [];
+  let created;
+  try {
+    created = await jira("/rest/api/3/issue", { method: "POST", cfg, body: { fields: { ...fields, assignee: { accountId: me.accountId } } } });
+    steps.push({ step: `Demanda criada (${type.name}) e atribuída a você`, ok: true });
+  } catch (e) {
+    if (!/assignee/i.test(e.message)) throw e;
+    created = await jira("/rest/api/3/issue", { method: "POST", cfg, body: { fields } });
+    steps.push({ step: `Demanda criada (${type.name})`, ok: true });
+    try { await jira(`/rest/api/3/issue/${created.key}/assignee`, { method: "PUT", cfg, body: { accountId: me.accountId } }); }
+    catch (e2) { steps.push({ step: "Atribuição", ok: false, detail: e2.message }); }
+  }
+
+  const ctx = await loadSubtaskContext(created.key);
+  const want = p.status === "done" ? "done" : p.status === "doing" ? "indeterminate" : null;
+  const target = want ? ctx.transitions.find((t) => t.toCategory === want) : null;
+  if (want && !target) steps.push({ step: "Status", ok: false, detail: "Nenhuma transição disponível para esse status." });
+  let res = { steps: [] };
+  try {
+    res = await applySingle({
+      key: created.key,
+      startDate: p.startDate || p.date,
+      startTime: fmtHM(p.start),
+      dueDate: p.dueDate || p.date,
+      originalEstimate: "",
+      timeSpent: minutes ? `${minutes}m` : "",
+      worklogComment: summary,
+      storyPoints: p.storyPoints ?? null,
+      startFieldId: ctx.startField?.id || null,
+      startFieldType: ctx.startField?.type || "date",
+      currentStartDate: null, currentEstimate: null, currentSpent: null,
+      storyFieldId: ctx.storyField?.id || null,
+      transitionId: target?.id || null,
+      transitionName: target?.name || "",
+      finalize: target?.toCategory === "done",
+    });
+  } catch (e) { steps.push({ step: "Apontamento e campos", ok: false, detail: e.message }); }
+  const all = [...steps, ...(res.steps || [])];
+  return { key: created.key, url: `${cfg.baseUrl}/browse/${created.key}`, project, logged: minutes, steps: all, ok: all.every((s) => s.ok !== false) };
+}
+
 async function createDeployCard(p = {}) {
   const cfg = await getConfig();
   const project = String(p.project || "").toUpperCase();
@@ -2853,6 +2912,7 @@ const HANDLERS = {
   ASSIGN_ISSUE: (p) => assignIssue(p),
   SAVE_SCRUM_SETTINGS: (p) => saveScrumSettings(p),
   CREATE_DEPLOY_CARD: (p) => createDeployCard(p),
+  CREATE_MEETING_ISSUE: (p) => createMeetingIssue(p),
   QA_QUEUE: (p) => qaQueue(p),
   POST_EVIDENCE: (p) => postEvidence(p),
   HANDOFF_GET: (p) => handoffGet(p),

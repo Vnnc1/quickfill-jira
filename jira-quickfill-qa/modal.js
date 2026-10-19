@@ -3,7 +3,7 @@ import { saveDraft, flushDraft, loadDraft, clearDraft, since } from "./lib/draft
 import { ROLE, INSTALL_CMD } from "./lib/role.js";
 import { loadAccent } from "./lib/theme.js";
 import { initFloat, popOutFromPanel } from "./lib/float.js";
-import { loadMeetings, onMeetingsChange, meetingMinutes, attachMeetings, meetingsCard } from "./lib/meetings.js";
+import { loadMeetings, onMeetingsChange, meetingMinutes, attachMeetings, meetingsCard, setMeetingApi } from "./lib/meetings.js";
 import { addDaysIso, isWeekendIso, DAY_MS } from "./lib/dates.js";
 import { totalOf, byIssue, streakAt, averageBefore, averageUntil, periodStats, weekCompare, countedDays, demandBoard, deployLabel, feitoLabel, DEMAND_GROUPS } from "./lib/devstats.js";
 import { STAGES, RISKS, DESIGN_STAGES, HANDOFF_ITEMS, TYPE_LABEL, stageOf, typeGroup, normName, sprintHealth, sprintTree, peopleLoad,
@@ -20,7 +20,7 @@ const inIframe = window.parent !== window;
 if (inIframe) document.documentElement.classList.add("embedded");
 /* Perfis: "qa" é o completo (Tarefa/Lote); "dev", "scrum" e "design" são painéis só de leitura. */
 const IS_DASH = ROLE !== "qa";
-const HAS_PROG = ROLE === "dev" || ROLE === "design";   // Hoje/Progresso: histórico dos seus apontamentos
+const HAS_PROG = ROLE === "dev" || ROLE === "design" || ROLE === "scrum";   // Hoje (e Progresso no DEV/DESIGN): histórico dos seus apontamentos
 const ROLE_NAME = { qa: "QuickFill QA", dev: "QuickFill DEV", scrum: "QuickFill SCRUM", design: "QuickFill DESIGN" }[ROLE] || "QuickFill";
 document.documentElement.classList.add(`role-${ROLE}`);
 if (IS_DASH) document.documentElement.classList.add("role-dash");
@@ -232,7 +232,7 @@ function setMode(mode, { restoring = false } = {}) {
     $("spaceBar").classList.toggle("hidden", !["panel", "qaq", "day", "team"].includes(mode));
     $("qaPeriodBar").classList.toggle("hidden", !["panel", "qaq", "day"].includes(mode));
   }
-  $("scPeriodBar").classList.toggle("hidden", mode === "team");   // Equipe tem a própria data
+  $("scPeriodBar").classList.toggle("hidden", mode === "team" || mode === "today");   // Equipe e Hoje têm a própria data
   state.mode = mode;
 
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.mode === mode));
@@ -1295,7 +1295,7 @@ function renderWorkday(plan) {
       ...d.plannedSlots.map((x) => ({ start: x.start, minutes: x.minutes, cls: "new", title: `${x.key} · ${fmtHM(x.start)}–${fmtHM(x.end)} (novo)` })),
     ];
     const tr = track(wd, segs);
-    if (MTG_ON) attachMeetings(tr, { date: d.date, readOnly: true });   // reuniões marcadas: para não apontar por cima
+    if (MTG_ON) attachMeetings(tr, { date: d.date, now: d.date === todayISO() ? nowMin() : null, onChange: rerenderMeetings });   // marcar reunião também aqui
     box.append(tr.track, tr.scale);
     if (tr.outside) note(box, "info", `${fmtDur(tr.outside)} fora da jornada ${fmtHM(wd.start)}–${fmtHM(wd.end)} neste dia (mesmo dia, contam no teto).`);
   }
@@ -2731,13 +2731,15 @@ $("dayDate").addEventListener("change", () => { const v = $("dayDate").value; if
 /* Reuniões na linha do tempo (teste, nos 4 perfis): contam na meta do dia se a opção estiver ligada. */
 const MTG_ON = true;
 const mtgMin = (date) => (MTG_ON ? meetingMinutes(date) : 0);
-function rerenderMeetings() {
-  if (state.mode === "day" && state.dayRep) renderDay(state.dayRep);
-  if (state.mode === "today" && DV.prog) renderToday();
+function rerenderMeetings(item) {
+  const fromJira = !!item?.jiraKey;   // virou demanda com apontamento: recarrega do Jira
+  if (state.mode === "day" && state.dayRep) { if (fromJira) loadDay(state.dayDate, { force: true }); else renderDay(state.dayRep); }
+  if (state.mode === "today" && DV.prog) { if (fromJira) loadToday({ force: true }); else renderToday(); }
   if (state.mode === "team" && typeof renderTeam === "function") renderTeam();
-  refreshDayPill();
+  if (state.mode === "single") refreshPreviews();
+  refreshDayPill(fromJira);
 }
-if (MTG_ON) { loadMeetings().then(rerenderMeetings); onMeetingsChange(rerenderMeetings); }
+if (MTG_ON) { setMeetingApi({ send }); loadMeetings().then(() => rerenderMeetings()); onMeetingsChange(() => rerenderMeetings()); }
 
 function updateDayPill(total, goal) {
   total += mtgMin(todayISO());
@@ -5807,6 +5809,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   try {
     defaults = await send("GET_DEFAULTS");
     DEF = { ...DEF, ...defaults, workday: { ...DEF.workday, ...(defaults.workday || {}) } };
+    setMeetingApi({ project: defaults.defaultProject || defaults.spaces?.batch?.label || "" });   // reuniões: onde a demanda é criada
     state.storyPoints = DEF.defaultStoryPoints;
     renderFib();
     updateTimeHint();
@@ -5844,8 +5847,8 @@ chrome.runtime.onMessage.addListener((msg) => {
     if (!projects.includes(gspace.project)) gspace.project = "";
     renderGlobalSpace([...new Set(projects)]);
     if (ROLE === "design" && !defaults?.designProjects?.length) toast("Configure o projeto do espaço de Design nas Opções — por enquanto aparecem MEED e SUS.", "info");
-    const TABS = { dev: ["today", "progress", "demands", "team"], scrum: ["sprint", "people", "risks", "team"], design: ["today", "hus", "progress", "team"] }[ROLE];
-    $("ctxLine").textContent = { dev: "Seu dia, seu progresso e sua equipe", scrum: "Sprint, pessoas, riscos e equipe", design: "Seu dia, suas HUs e suas metas" }[ROLE] || "";
+    const TABS = { dev: ["today", "progress", "demands", "team"], scrum: ["today", "sprint", "people", "risks", "team"], design: ["today", "hus", "progress", "team"] }[ROLE];
+    $("ctxLine").textContent = { dev: "Seu dia, seu progresso e sua equipe", scrum: "Seu dia, sprint, pessoas, riscos e equipe", design: "Seu dia, suas HUs e suas metas" }[ROLE] || "";
     if (HAS_PROG) await warmProg();
     const want = params.get("tab");
     const view = await resumeView();
@@ -5875,6 +5878,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     applyViewAfter(view);
   }
   if (restored || view) return;
+  setMode("day", { restoring: true });   // primeira aba do QA: Meu dia
 
   const fromParam = params.get("key");
   if (fromParam) { $("parentKey").value = fromParam; return findSubtasks(); }

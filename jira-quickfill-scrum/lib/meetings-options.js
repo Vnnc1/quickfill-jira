@@ -63,7 +63,7 @@ function render() {
   list.innerHTML = "";
   const items = filtered();
   if (!items.length) {
-    list.innerHTML = `<p class="mtg-empty">Nada marcado neste período. Arraste a bolinha azul da linha do tempo até o horário da reunião.</p>`;
+    list.innerHTML = `<p class="mtg-empty">Nada marcado neste período. Arraste a bolinha + da linha do tempo até o horário da reunião.</p>`;
     return;
   }
   const byDay = new Map();

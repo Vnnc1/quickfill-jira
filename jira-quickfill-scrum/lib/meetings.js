@@ -3,7 +3,8 @@
  *
  * Daily, alinhamentos e reuniões marcados direto na linha do tempo do dia: arraste a bolinha
  * até o horário, solte, preencha título/início/fim/descrição. Ficam guardados só no navegador
- * (chrome.storage.local) e contam na meta do dia se a opção estiver ligada.
+ * (chrome.storage.local) e contam na meta do dia se a opção estiver ligada. Alinhamentos, reuniões
+ * e outros podem virar uma Tarefa no Jira (com o tempo apontado); a Daily fica só no QuickFill.
  * As Opções mostram o histórico (lib/meetings-options.js).
  */
 
@@ -17,6 +18,10 @@ export const MEETING_TYPES = {
 export const MEETING_DEFAULTS = { meetingsDot: true, meetingsGoal: true, meetingsDur: 30 };
 
 const cache = { list: [], settings: { dot: true, goal: true, dur: 30 } };
+/** Ponte com o modal.js: enviar ao serviço (criar no Jira) e o projeto padrão. */
+const api = { send: null, project: "" };
+export function setMeetingApi(a) { Object.assign(api, a); }
+const SP = [1, 2, 3, 5, 8, 13, 21];
 
 const pad = (n) => String(n).padStart(2, "0");
 export const hhmm = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
@@ -43,8 +48,10 @@ export function onMeetingsChange(cb) {
 }
 
 export const meetingsOn = (date) => cache.list.filter((m) => m.date === date).sort((a, b) => a.start - b.start);
-/** Minutos de reunião que contam na meta do dia (0 se a opção estiver desligada). */
-export const meetingMinutes = (date) => (cache.settings.goal ? meetingsOn(date).reduce((s, m) => s + (m.end - m.start), 0) : 0);
+/** Minutos de reunião que contam na meta do dia (0 se a opção estiver desligada).
+ *  As que viraram demanda no Jira com tempo apontado já entram pelo apontamento: não contam de novo. */
+export const meetingMinutes = (date) => (cache.settings.goal
+  ? meetingsOn(date).filter((m) => !(m.jiraKey && m.logged)).reduce((s, m) => s + (m.end - m.start), 0) : 0);
 export const meetingSettings = () => cache.settings;
 
 export async function saveMeeting(m) {
@@ -65,7 +72,7 @@ export async function deleteMeeting(id) {
 export function openMeetingModal(m, { onDone } = {}) {
   document.querySelector(".mtg-modal")?.remove();
   const editing = !!m.id;
-  const cur = { type: "daily", title: "", desc: "", ...m };
+  const cur = { type: "daily", title: "", desc: "", jira: false, startDate: m.date, dueDate: m.date, sp: null, status: "done", ...m };
   if (!cur.title && !editing) cur.title = MEETING_TYPES[cur.type].label;
 
   const wrap = document.createElement("div");
@@ -81,6 +88,21 @@ export function openMeetingModal(m, { onDone } = {}) {
       </div>
       <div class="mtg-dur muted xs"></div>
       <label class="mtg-f"><span>Descrição <em>(opcional)</em></span><textarea class="inp" rows="3" data-desc placeholder="O que foi combinado"></textarea></label>
+      <div class="mtg-jira" data-jira-wrap>
+        <label class="mtg-chk"><input type="checkbox" data-jira /><span>Criar a demanda no Jira <em data-proj></em></span></label>
+        <div class="mtg-jira-fields" data-jira-fields>
+          <div class="mtg-row">
+            <label class="mtg-f"><span>Data de início</span><input class="inp" type="date" data-sdate /></label>
+            <label class="mtg-f"><span>Data limite</span><input class="inp" type="date" data-ddate /></label>
+          </div>
+          <div class="mtg-f"><span>Story points</span><div class="mtg-sp" data-sp></div></div>
+          <label class="mtg-f"><span>Status</span><select class="inp" data-status><option value="done">Concluído</option><option value="doing">Em andamento</option><option value="keep">Não alterar</option></select></label>
+          <p class="muted xs mtg-note" data-jira-note></p>
+        </div>
+      </div>
+      <p class="muted xs mtg-note" data-daily-note>A daily fica só no QuickFill (não vira demanda no Jira).</p>
+      <div class="mtg-linked" data-linked></div>
+      <p class="mtg-err" data-err></p>
       <div class="mtg-actions">
         ${editing ? '<button class="btn sm mtg-del" data-del>Excluir</button>' : ""}
         <span class="grow"></span>
@@ -103,12 +125,53 @@ export function openMeetingModal(m, { onDone } = {}) {
         const auto = !cur.title || Object.values(MEETING_TYPES).some((x) => x.label === cur.title);
         cur.type = k;
         if (auto) { cur.title = k === "outro" ? "" : t.label; $("[data-title]").value = cur.title; }
-        paintTypes();
+        paintTypes(); paintJira();
       });
       types.appendChild(b);
     }
   };
-  const paintDur = () => { $(".mtg-dur").textContent = `${fmtMin(cur.end - cur.start)}${cache.settings.goal ? " que contam na meta do dia" : ""}`; };
+  const paintDur = () => { $(".mtg-dur").textContent = `${fmtMin(cur.end - cur.start)}${cache.settings.goal ? " que contam na meta do dia" : ""}`; paintJira(); };
+
+  /* Jira: só para alinhamento, reunião e outro; a Daily fica local */
+  const sp = $("[data-sp]");
+  for (const v of [...SP, null]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "mtg-spb";
+    b.textContent = v == null ? "sem" : String(v);
+    b.dataset.v = v == null ? "" : String(v);
+    b.addEventListener("click", () => { cur.sp = v; paintJira(); });
+    sp.appendChild(b);
+  }
+  function paintJira() {
+    const daily = cur.type === "daily", linked = !!cur.jiraKey;
+    $("[data-jira-wrap]").hidden = daily || linked || !api.send;
+    $("[data-daily-note]").hidden = !daily || linked;
+    $("[data-jira]").checked = !!cur.jira;
+    $("[data-jira-fields]").hidden = !cur.jira;
+    $("[data-proj]").textContent = api.project ? `em ${api.project}` : "";
+    sp.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === (cur.sp == null ? "" : String(cur.sp))));
+    $("[data-jira-note]").textContent = `Cria uma Tarefa${api.project ? ` em ${api.project}` : ""} atribuída a você e aponta ${fmtMin(cur.end - cur.start)} a partir das ${hhmm(cur.start)}.`;
+    const lk = $("[data-linked]");
+    lk.innerHTML = "";
+    if (linked) {
+      const a = document.createElement("a");
+      a.href = cur.jiraUrl || "#"; a.target = "_blank"; a.rel = "noopener";
+      a.textContent = `${cur.jiraKey} no Jira ↗`;
+      const small = document.createElement("span");
+      small.className = "muted xs";
+      small.textContent = " Mudanças aqui não alteram a demanda no Jira.";
+      lk.append(a, small);
+    }
+    $("[data-save]").textContent = cur.jira && !daily && !linked ? "Salvar e criar no Jira" : "Salvar";
+  }
+  $("[data-jira]").addEventListener("change", (e) => { cur.jira = e.target.checked; paintJira(); });
+  $("[data-sdate]").addEventListener("change", (e) => { cur.startDate = e.target.value || cur.date; });
+  $("[data-ddate]").addEventListener("change", (e) => { cur.dueDate = e.target.value || cur.date; });
+  $("[data-status]").addEventListener("change", (e) => { cur.status = e.target.value; });
+  $("[data-sdate]").value = cur.startDate || cur.date;
+  $("[data-ddate]").value = cur.dueDate || cur.date;
+  $("[data-status]").value = cur.status;
   paintTypes();
   $("[data-title]").value = cur.title;
   $("[data-start]").value = hhmm(cur.start);
@@ -133,11 +196,29 @@ export function openMeetingModal(m, { onDone } = {}) {
   document.addEventListener("keydown", onKey, true);
   wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
   wrap.querySelectorAll("[data-x]").forEach((b) => b.addEventListener("click", close));
-  $("[data-save]").addEventListener("click", async () => {
+  $("[data-save]").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
     const item = { ...cur, title: (cur.title || "").trim() || MEETING_TYPES[cur.type].label, desc: (cur.desc || "").trim(),
       id: cur.id || `m${Date.now().toString(36)}`, savedAt: Date.now() };
+    $("[data-err]").textContent = "";
+    if (item.jira && item.type !== "daily" && !item.jiraKey && api.send) {
+      btn.disabled = true; btn.textContent = "Criando no Jira…";
+      try {
+        const res = await api.send("CREATE_MEETING_ISSUE", {
+          title: item.title, desc: item.desc, date: item.date, start: item.start, end: item.end,
+          startDate: item.startDate || item.date, dueDate: item.dueDate || item.date, storyPoints: item.sp, status: item.status,
+        });
+        Object.assign(item, { jiraKey: res.key, jiraUrl: res.url, logged: res.logged || 0, jiraOk: res.ok });
+        if (!res.ok) item.jiraIssues = (res.steps || []).filter((x) => x.ok === false).map((x) => `${x.step}: ${x.detail || "falhou"}`);
+      } catch (err) {
+        btn.disabled = false; paintJira();
+        $("[data-err]").textContent = `Não deu para criar no Jira: ${err.message}`;
+        return;
+      }
+    }
+    delete item.jira;
     await saveMeeting(item);
-    close(); onDone?.();
+    close(); onDone?.(item);
   });
   $("[data-del]")?.addEventListener("click", async () => { await deleteMeeting(cur.id); close(); onDone?.(); });
   document.body.appendChild(wrap);
@@ -200,7 +281,7 @@ export function attachMeetings(tr, { date, now = null, onChange, readOnly = fals
     blk.style.width = pct(lo + (m.end - m.start));
     blk.style.borderColor = t0.color;
     blk.style.background = rgba(t0.color, 0.22);
-    blk.title = `${t0.label}: ${m.title} · ${hhmm(m.start)}–${hhmm(m.end)} · ${fmtMin(m.end - m.start)}`;
+    blk.title = `${t0.label}: ${m.title} · ${hhmm(m.start)}–${hhmm(m.end)} · ${fmtMin(m.end - m.start)}${m.jiraKey ? ` · ${m.jiraKey}` : ""}`;
     if (readOnly) { blk.classList.add("ro"); t.appendChild(blk); continue; }
     blk.addEventListener("click", (e) => { e.stopPropagation(); openMeetingModal(m, { onDone: onChange }); });
     const dot = document.createElement("button");
@@ -251,7 +332,7 @@ export function meetingsCard(date, { onChange } = {}) {
     const p = document.createElement("p");
     p.className = "muted xs";
     p.style.margin = "0";
-    p.textContent = cache.settings.dot ? "Nenhuma ainda. Arraste a bolinha azul da linha do tempo até o horário da reunião." : "Nenhuma reunião marcada neste dia.";
+    p.textContent = cache.settings.dot ? "Nenhuma ainda. Arraste a bolinha + da linha do tempo até o horário da reunião." : "Nenhuma reunião marcada neste dia.";
     card.appendChild(p);
     return card;
   }
@@ -259,12 +340,25 @@ export function meetingsCard(date, { onChange } = {}) {
     const t0 = MEETING_TYPES[m.type] || MEETING_TYPES.outro;
     const row = document.createElement("div");
     row.className = "mtg-row-item";
-    row.innerHTML = `<span class="mtg-pill"></span><div class="mtg-txt"><b></b><small></small></div><button class="btn sm ghost">Editar</button>`;
+    row.innerHTML = `<span class="mtg-pill"></span><div class="mtg-txt"><b></b><small></small></div><span class="mtg-acts"></span>`;
     const pill = row.querySelector(".mtg-pill");
     pill.textContent = t0.label; pill.style.color = t0.color; pill.style.background = rgba(t0.color, 0.2);
     row.querySelector("b").textContent = m.title;
     row.querySelector("small").textContent = `${hhmm(m.start)} às ${hhmm(m.end)}, ${fmtMin(m.end - m.start)}${m.desc ? ` · ${m.desc}` : ""}`;
-    row.querySelector("button").addEventListener("click", () => openMeetingModal(m, { onDone: onChange }));
+    const acts = row.querySelector(".mtg-acts");
+    if (m.jiraKey) {
+      const a = document.createElement("a");
+      a.className = "btn sm ghost mtg-jira-link";
+      a.href = m.jiraUrl || "#"; a.target = "_blank"; a.rel = "noopener";
+      a.textContent = `${m.jiraKey} ↗`;
+      a.title = m.jiraIssues?.length ? `Abrir no Jira. Avisos: ${m.jiraIssues.join("; ")}` : "Abrir no Jira";
+      acts.appendChild(a);
+    }
+    const ed = document.createElement("button");
+    ed.className = "btn sm ghost";
+    ed.textContent = "Editar";
+    ed.addEventListener("click", () => openMeetingModal(m, { onDone: onChange }));
+    acts.appendChild(ed);
     card.appendChild(row);
   }
   return card;

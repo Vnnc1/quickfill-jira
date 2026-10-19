@@ -669,6 +669,7 @@ html.embedded.role-dash body { width: 100%; }
 .m-card .legend { flex-wrap: wrap; gap: 4px 12px; }
 .role-dash #teamScope { display: none !important; }
 .role-dash .tabs { grid-template-columns: repeat(4, 1fr); }
+.role-scrum .tabs { grid-template-columns: repeat(5, 1fr); }   /* Hoje, Sprint, Pessoas, Riscos, Equipe */
 
 /* ---------- QuickFill DEV: Hoje / Progresso / Demandas ---------- */
 #todayBox, #progressBox, #demandsBox { display: flex; flex-direction: column; gap: 10px; transition: opacity .2s; }
@@ -1295,8 +1296,23 @@ html.float .top-actions .ic { width: 28px; height: 28px; }
 .mtg-actions { display: flex; gap: 8px; align-items: center; }
 .mtg-actions .grow { flex: 1; }
 .mtg-del { color: var(--err); background: transparent; border-color: rgba(248, 113, 104, .4); }
+.mtg-jira { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+.mtg-jira[hidden], .mtg-jira-fields[hidden], .mtg-note[hidden] { display: none !important; }
+.mtg-jira-fields { display: flex; flex-direction: column; gap: 10px; }
+.mtg-chk { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.mtg-chk input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+.mtg-chk em { font-style: normal; font-weight: 400; color: var(--muted); }
+.mtg-sp { display: flex; flex-wrap: wrap; gap: 4px; }
+.mtg-spb { min-width: 34px; border: 1px solid var(--line); background: var(--surface-2); color: var(--txt); border-radius: 7px; padding: 4px 8px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.mtg-spb.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.mtg-note { margin: 0; }
+.mtg-linked { font-size: 12.5px; } .mtg-linked a { color: var(--accent); font-weight: 600; }
+.mtg-err { margin: 0; font-size: 12px; color: var(--err); } .mtg-err:empty { display: none; }
+.mtg-acts { display: flex; gap: 6px; flex: none; }
+.mtg-jira-link { text-decoration: none; color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .mtg-box { animation: none; } }
 .t-lane-track.has-mtg { overflow: visible; touch-action: none; }
 .t-lane-track.has-mtg .mtg-add { top: -8px; width: 18px; height: 18px; margin-left: -9px; }
 .t-lane-track.has-mtg .mtg-tip { top: -34px; }
 .has-mtg-ro .mtg-blk.ro { cursor: default; opacity: .9; }
+.mtg-box { max-height: calc(100vh - 32px); overflow-y: auto; scrollbar-width: thin; }
