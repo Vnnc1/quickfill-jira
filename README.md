@@ -1,6 +1,6 @@
 # QuickFill para Jira
 
-Extensões do Chrome para o dia a dia da equipe no Jira (Meeds All e Sustentação):
+Extensões do Chrome para o dia a dia da equipe no Jira:
 
 | QuickFill | Para quem | O que faz |
 |---|---|---|

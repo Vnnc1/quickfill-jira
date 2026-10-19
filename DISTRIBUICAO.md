@@ -19,15 +19,7 @@ Não precisa mandar arquivo nenhum. O instalador sempre baixa a versão mais nov
   Se o Documentos estiver no OneDrive, vai para lá.
 - O instalador atualiza só os perfis que a pessoa já tem. Para instalar outro, basta rodar e escolher.
 
-## Para você: publicar uma versão
-
-1. Altere o código em `jira-quickfill-qa/`.
-2. Em `build.mjs`, aumente `VERSION` (ex.: `4.1.0` → `4.2.0`). Em `release.config.json`, escreva em `notes`
-   o que mudou (é o texto que aparece no aviso).
-3. Rode `npm test` e depois `npm run zip`.
-4. Faça `git add -A`, `git commit -m "QuickFill 4.2.0"` e `git push`.
-
-Em até 6 horas, quem abrir o QuickFill vê o aviso de versão nova.
+Para atualizações o sistema retorna qualquer atualização em até 6 horas, quem abrir o QuickFill vê o aviso de versão nova.
 
 ## Como funciona o botão "Atualizar agora"
 
@@ -38,18 +30,8 @@ O Chrome não deixa uma extensão alterar os próprios arquivos. Por isso o inst
 - ao clicar no botão, a extensão chama o ajudante, que roda o mesmo instalador em modo silencioso e baixa a
   versão nova do repositório; em seguida a extensão se recarrega e volta onde a pessoa estava.
 
-O registro da última atualização fica em `Documentos\QuickFill\.ajudante\ultima-atualizacao.log`.
 Para desativar, apague a pasta `.ajudante` e a chave
 `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.quickfill.updater`.
-
-## Arquivos de publicação (gerados pelo `npm run zip`)
-
-| Arquivo | Para quê |
-|---|---|
-| `update.json` | Versão mais nova, notas e o comando de instalação, lidos pela extensão para avisar |
-| `dist/jira-quickfill-*.zip` | Os quatro pacotes |
-| `dist/quickfill.ps1` | O instalador (baixado direto pelo comando) |
-| `dist/atualizar-quickfill.bat` | O mesmo comando em um arquivo, para quem prefere dois cliques |
 
 ## Perguntas comuns
 
@@ -58,7 +40,3 @@ Para desativar, apague a pasta `.ajudante` e a chave
 - **Win+R está bloqueado na máquina:** abra o **PowerShell** pelo menu Iniciar e cole o mesmo comando.
 - **O Windows avisou que o .bat é de fonte desconhecida:** clique em *Mais informações › Executar assim mesmo*,
   ou use o comando pelo Win+R, que não passa por esse aviso.
-- **Quero 100% automático, sem nem colar o comando:** só publicando na Chrome Web Store como **não listada**
-  (US$ 5 uma vez), ou pelo Google Workspace da empresa. O código é o mesmo.
-- **E o token de leitura da versão anterior (repositório privado)?** Não é mais necessário. Quem já tinha
-  continua funcionando; pode apagá-lo no GitHub se quiser.

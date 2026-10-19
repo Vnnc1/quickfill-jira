@@ -54,22 +54,19 @@ const ROLES = {
   },
 };
 
-/* Distribuição pelo repositório da equipe (release.config.json):
- *   { "repo": "https://github.com/ORG/quickfill", "branch": "main", "notes": "o que mudou" }
- * Gera update.json (lido pela extensão para avisar "nova versão") e, com --zip, os .zip em dist/
- * junto do atualizar-quickfill.ps1 que a equipe roda para instalar/atualizar. */
+
 const RELEASE_FILE = join(ROOT, "release.config.json");
 if (!existsSync(RELEASE_FILE)) writeFileSync(RELEASE_FILE, JSON.stringify({ repo: "", branch: "main", notes: "" }, null, 2) + "\n");
 const RELEASE = JSON.parse(readFileSync(RELEASE_FILE, "utf8"));
 const GH = String(RELEASE.repo || "").match(/github\.com\/([^/]+)\/([^/#?]+?)(?:\.git)?\/?$/);
 const BRANCH = RELEASE.branch || "main";
-// Repositório privado: arquivos lidos pela API do GitHub com um token só de leitura (ver DISTRIBUICAO.md).
+
 const PRIVATE = RELEASE.private !== false;
 const ghFile = (path) => (PRIVATE
   ? `https://api.github.com/repos/${GH[1]}/${GH[2]}/contents/${path}?ref=${BRANCH}`
   : `https://raw.githubusercontent.com/${GH[1]}/${GH[2]}/${BRANCH}/${path}`);
 const UPDATE_URL = RELEASE.updateUrl || (GH ? ghFile("update.json") : "");
-// Repositório público: um comando (ou o .bat, que é só esse comando) sempre baixa o instalador mais novo.
+
 const SCRIPT_URL = GH && !PRIVATE ? ghFile("dist/quickfill.ps1") : "";
 const INSTALL_CMD = SCRIPT_URL ? `powershell -NoProfile -ExecutionPolicy Bypass -Command "irm ${SCRIPT_URL} | iex"` : "";
 const downloadOf = (dir) => (RELEASE.downloadBase ? `${RELEASE.downloadBase.replace(/\/+$/, "")}/${dir}.zip`
@@ -107,11 +104,11 @@ export const INSTALL_CMD = ${JSON.stringify(INSTALL_CMD)};
 function manifest(role, r) {
   const src = JSON.parse(readFileSync(join(SRC, "manifest.json"), "utf8"));
   const icons = Object.fromEntries(ICON_SIZES.map((n) => [String(n), `icons/icon${n}.png`]));
-  // Só o DESIGN conversa com a API do Figma (achar a tela da HU).
+
   const hosts = (src.host_permissions || []).filter((h) => !h.includes("figma.com"));
   return JSON.stringify({
     ...src,
-    // api.github.com: aviso de nova versão do repositório privado · api.figma.com: telas do Figma (DESIGN)
+
     host_permissions: [...hosts.filter((h) => !h.includes("github.com")), "https://api.github.com/*", ...(role === "design" ? ["https://api.figma.com/*"] : [])],
     icons,
     name: r.name,
@@ -147,7 +144,7 @@ function contentCss(role, r) {
 }
 
 const shared = listFiles(SRC).filter((f) => !PER_ROLE.has(f));
-// A fonte guarda o content.js/css do QA; os outros perfis são derivados dele.
+
 const qaContent = { js: readFileSync(join(SRC, "content.js"), "utf8"), css: readFileSync(join(SRC, "content.css"), "utf8") };
 
 for (const [role, r] of Object.entries(ROLES)) {
@@ -196,8 +193,7 @@ writeFileSync(join(ROOT, "update.json"), JSON.stringify(update, null, 2) + "\n")
 mkdirSync(join(ROOT, "dist"), { recursive: true });
 const ps1 = readFileSync(join(ROOT, "tools", "atualizar-quickfill.ps1"), "utf8").replace("__UPDATE_URL__", UPDATE_URL || "__UPDATE_URL__").replaceAll("__SCRIPT_URL__", SCRIPT_URL || "__SCRIPT_URL__");
 if (INSTALL_CMD) {
-  // Público: quickfill.ps1 é lido direto do GitHub; o .bat tem só o comando (um arquivo, sempre a versão mais nova).
-  writeFileSync(join(ROOT, "dist", "quickfill.ps1"), ps1);
+  
   writeFileSync(join(ROOT, "dist", "atualizar-quickfill.bat"), `@echo off\r\ntitle QuickFill - instalar / atualizar\r\n${INSTALL_CMD}\r\n`);
   for (const old of ["atualizar-quickfill.ps1"]) { try { rmSync(join(ROOT, "dist", old)); } catch { /* já não existe */ } }
 } else {
