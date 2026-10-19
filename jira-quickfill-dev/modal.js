@@ -4432,7 +4432,7 @@ function renderSprint() {
     box.appendChild(card);
 
     /* --- Feito acumulado → card de deploy --- */
-    const feito = s.issues.filter((i) => stageOf(i) === "feito");
+    const feito = s.issues.filter((i) => !i.isSubtask && stageOf(i) === "feito");   // como no quadro: só os cards, sem subtarefas
     if (P.deploy && feito.length) {
       const over = feito.length >= scSettings().feitoThreshold;
       const w = el("div", `dv-pace ${over ? "down" : "up"} sc-deploy`);

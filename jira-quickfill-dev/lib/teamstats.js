@@ -286,17 +286,20 @@ export function sprintRisks(sprint, { staleDays = 3, today, now = Date.now(), is
     const st = stageOf(i);
     const open = st !== "done";
     const age = businessAge(lastMove(i), now);
-    if (open && (i.flagged || st === "blocked")) out.flagged.push({ issue: i, age, why: st === "blocked" ? i.status.name : "sinalizada" });
+    // Riscos de coluna seguem o quadro: só os cards da sprint (HU, tarefa, bug), como o Jira mostra.
+    // As subtarefas ficam dentro do card e não entram nessas contagens.
+    const card = !i.isSubtask;
+    if (card && open && (i.flagged || st === "blocked")) out.flagged.push({ issue: i, age, why: st === "blocked" ? i.status.name : "sinalizada" });
     const reopens = reopenEvents(i, Math.max(startMs, evFrom));
     if (reopens.length) {
       const last = reopens[reopens.length - 1];
       out.returned.push({ issue: i, count: reopens.length, last, byQa: reopens.some((t) => isQa(t.by, t.byName)) });
     }
-    if (st === "doing" && age >= staleDays) out.stalled.push({ issue: i, age });
-    if (st === "qa" && (enteredStageAt(i, "qa") || lastMove(i) || 0) >= evFrom) out.qaQueue.push({ issue: i, age });
-    if (st === "feito" && (enteredStageAt(i, "feito") || lastMove(i) || 0) >= evFrom) out.feitoQueue.push({ issue: i, age });
+    if (card && st === "doing" && age >= staleDays) out.stalled.push({ issue: i, age });
+    if (card && st === "qa" && (enteredStageAt(i, "qa") || lastMove(i) || 0) >= evFrom) out.qaQueue.push({ issue: i, age });
+    if (card && st === "feito" && (enteredStageAt(i, "feito") || lastMove(i) || 0) >= evFrom) out.feitoQueue.push({ issue: i, age });
     if (open && i.due && i.due < today) out.overdue.push({ issue: i, age, late: businessDays(i.due, today).length - 1 });
-    if (st === "todo" && isHigh(i.priority)) out.highTodo.push({ issue: i, age });
+    if (card && st === "todo" && isHigh(i.priority)) out.highTodo.push({ issue: i, age });
     if (open && !i.assignee && !i.isSubtask) out.unassigned.push({ issue: i, age });
     if (i.estimate && i.spent > i.estimate) out.overEstimate.push({ issue: i, age, over: i.spent - i.estimate });
     if (!i.isSubtask && i.created && i.created > startMs + DAY_MS && i.created >= evFrom) out.added.push({ issue: i, age });

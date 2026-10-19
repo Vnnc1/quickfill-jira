@@ -169,3 +169,18 @@ test("PR (pull request) é a coluna de Feito do MEED; PRD continua deploy de pro
   assert.ok(FEITO.test("pr") && FEITO.test("pull request"));
   assert.ok(!FEITO.test("deploy prd") && PRD.test("deploy prd"));
 });
+
+test("Filas do quadro (Feito/PR, Validação, Impedidas) contam só os cards da sprint, como o Jira", async () => {
+  const { linkParents } = await import("../jira-quickfill-qa/lib/teamstats.js");
+  const pai = issue({ key: "SUS-2290", kind: "feito", status: { id: "f", name: "Feito", cat: "indeterminate" } });
+  const subFeito = issue({ key: "SUS-2291", isSubtask: true, parentKey: "SUS-2290", kind: "feito", status: { id: "f", name: "Feito", cat: "indeterminate" } });
+  const pai2 = issue({ key: "MEED-2262", kind: "other" });
+  const subPr = issue({ key: "MEED-2264", isSubtask: true, parentKey: "MEED-2262", kind: "feito", status: { id: "p", name: "PR", cat: "indeterminate" } });
+  const subQa = issue({ key: "MEED-2265", isSubtask: true, parentKey: "MEED-2262", kind: "qa", status: { id: "q", name: "Validação", cat: "indeterminate" } });
+  const subImp = issue({ key: "MEED-2266", isSubtask: true, parentKey: "MEED-2262", kind: "blocked", status: { id: "b", name: "Impedido", cat: "indeterminate" } });
+  linkParents([pai, subFeito, pai2, subPr, subQa, subImp]);
+  const r = sprintRisks({ start: "2026-10-06", issues: [pai, subFeito, pai2, subPr, subQa, subImp] }, { today: "2026-10-15" });
+  assert.deepEqual(r.feitoQueue.map((x) => x.issue.key), ["SUS-2290"]);   // subtarefas em Feito/PR não viram "cards"
+  assert.equal(r.qaQueue.length, 0);
+  assert.equal(r.flagged.length, 0);
+});
