@@ -20,7 +20,7 @@ const inIframe = window.parent !== window;
 if (inIframe) document.documentElement.classList.add("embedded");
 /* Perfis: "qa" é o completo (Tarefa/Lote); "dev", "scrum" e "design" são painéis só de leitura. */
 const IS_DASH = ROLE !== "qa";
-const HAS_PROG = ROLE === "dev" || ROLE === "design" || ROLE === "scrum";   // Hoje (e Progresso no DEV/DESIGN): histórico dos seus apontamentos
+const HAS_PROG = ROLE === "dev" || ROLE === "design";   // Hoje/Progresso: histórico dos seus apontamentos
 const ROLE_NAME = { qa: "QuickFill QA", dev: "QuickFill DEV", scrum: "QuickFill SCRUM", design: "QuickFill DESIGN" }[ROLE] || "QuickFill";
 document.documentElement.classList.add(`role-${ROLE}`);
 if (IS_DASH) document.documentElement.classList.add("role-dash");
@@ -5847,8 +5847,8 @@ chrome.runtime.onMessage.addListener((msg) => {
     if (!projects.includes(gspace.project)) gspace.project = "";
     renderGlobalSpace([...new Set(projects)]);
     if (ROLE === "design" && !defaults?.designProjects?.length) toast("Configure o projeto do espaço de Design nas Opções — por enquanto aparecem MEED e SUS.", "info");
-    const TABS = { dev: ["today", "progress", "demands", "team"], scrum: ["today", "sprint", "people", "risks", "team"], design: ["today", "hus", "progress", "team"] }[ROLE];
-    $("ctxLine").textContent = { dev: "Seu dia, seu progresso e sua equipe", scrum: "Seu dia, sprint, pessoas, riscos e equipe", design: "Seu dia, suas HUs e suas metas" }[ROLE] || "";
+    const TABS = { dev: ["today", "progress", "demands", "team"], scrum: ["sprint", "people", "risks", "team"], design: ["today", "hus", "progress", "team"] }[ROLE];
+    $("ctxLine").textContent = { dev: "Seu dia, seu progresso e sua equipe", scrum: "Sprint, pessoas, riscos e equipe", design: "Seu dia, suas HUs e suas metas" }[ROLE] || "";
     if (HAS_PROG) await warmProg();
     const want = params.get("tab");
     const view = await resumeView();

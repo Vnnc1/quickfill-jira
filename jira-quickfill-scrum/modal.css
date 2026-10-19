@@ -669,7 +669,6 @@ html.embedded.role-dash body { width: 100%; }
 .m-card .legend { flex-wrap: wrap; gap: 4px 12px; }
 .role-dash #teamScope { display: none !important; }
 .role-dash .tabs { grid-template-columns: repeat(4, 1fr); }
-.role-scrum .tabs { grid-template-columns: repeat(5, 1fr); }   /* Hoje, Sprint, Pessoas, Riscos, Equipe */
 
 /* ---------- QuickFill DEV: Hoje / Progresso / Demandas ---------- */
 #todayBox, #progressBox, #demandsBox { display: flex; flex-direction: column; gap: 10px; transition: opacity .2s; }
