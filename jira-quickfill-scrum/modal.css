@@ -1266,3 +1266,37 @@ html.float .top-actions .ic { width: 28px; height: 28px; }
   .m-tools > .grow { flex-basis: 100%; order: 9; }
   .m-kpis, .m-kpis.four, .dm-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ---------- Reuniões na linha do tempo (teste, QA e DEV) ---------- */
+.track.has-mtg { overflow: visible; height: 26px; margin-top: 12px; touch-action: none; }
+.track.has-mtg .seg { top: 5px; bottom: 5px; }
+.mtg-blk { position: absolute; top: 2px; bottom: 2px; border: 1px solid; border-radius: 4px; box-sizing: border-box; min-width: 6px; cursor: pointer; z-index: 1; }
+.mtg-dot { position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; padding: 0; border-radius: 50%; border: 2px solid var(--surface); cursor: grab; z-index: 2; }
+.mtg-add { position: absolute; top: -10px; width: 20px; height: 20px; margin-left: -10px; padding: 0; border-radius: 50%; border: 2px solid var(--surface); background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; cursor: grab; z-index: 3; box-shadow: 0 0 0 3px var(--accent-soft); }
+.mtg-add svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 4; stroke-linecap: round; }
+.mtg-dot:active, .mtg-add:active { cursor: grabbing; }
+.mtg-tip { position: absolute; top: -36px; transform: translateX(-50%); background: #0d1013; border: 1px solid var(--line-strong); border-radius: 6px; padding: 3px 7px; font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; z-index: 4; }
+.mtg-card { gap: 8px; }
+.mtg-row-item { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg); }
+.mtg-pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; flex: none; }
+.mtg-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mtg-txt b { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mtg-txt small { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mtg-modal { position: fixed; inset: 0; z-index: 60; background: rgba(9, 12, 16, .6); display: grid; place-items: center; padding: 16px; }
+.mtg-box { width: 100%; max-width: 360px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 18px 50px rgba(0, 0, 0, .5); padding: 14px; display: flex; flex-direction: column; gap: 11px; animation: qfFloatIn .16s cubic-bezier(.2, .8, .2, 1) both; }
+.mtg-head { display: flex; align-items: center; } .mtg-head b { flex: 1; font-size: 14px; }
+.mtg-types { display: flex; flex-wrap: wrap; gap: 6px; }
+.mtg-type { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 5px 11px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.mtg-type.on { color: var(--txt); }
+.mtg-type i { width: 8px; height: 8px; border-radius: 50%; }
+.mtg-f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.mtg-f em { font-style: normal; font-weight: 400; }
+.mtg-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.mtg-actions { display: flex; gap: 8px; align-items: center; }
+.mtg-actions .grow { flex: 1; }
+.mtg-del { color: var(--err); background: transparent; border-color: rgba(248, 113, 104, .4); }
+@media (prefers-reduced-motion: reduce) { .mtg-box { animation: none; } }
+.t-lane-track.has-mtg { overflow: visible; touch-action: none; }
+.t-lane-track.has-mtg .mtg-add { top: -8px; width: 18px; height: 18px; margin-left: -9px; }
+.t-lane-track.has-mtg .mtg-tip { top: -34px; }
+.has-mtg-ro .mtg-blk.ro { cursor: default; opacity: .9; }

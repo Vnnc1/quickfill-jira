@@ -3,6 +3,7 @@ import { saveDraft, flushDraft, loadDraft, clearDraft, since } from "./lib/draft
 import { ROLE, INSTALL_CMD } from "./lib/role.js";
 import { loadAccent } from "./lib/theme.js";
 import { initFloat, popOutFromPanel } from "./lib/float.js";
+import { loadMeetings, onMeetingsChange, meetingMinutes, attachMeetings, meetingsCard } from "./lib/meetings.js";
 import { addDaysIso, isWeekendIso, DAY_MS } from "./lib/dates.js";
 import { totalOf, byIssue, streakAt, averageBefore, averageUntil, periodStats, weekCompare, countedDays, demandBoard, deployLabel, feitoLabel, DEMAND_GROUPS } from "./lib/devstats.js";
 import { STAGES, RISKS, DESIGN_STAGES, HANDOFF_ITEMS, TYPE_LABEL, stageOf, typeGroup, normName, sprintHealth, sprintTree, peopleLoad,
@@ -1248,7 +1249,7 @@ function track(wd, segs) {
     if (h < wd.start || h > wd.end) sp.classList.add("off");
     scale.appendChild(sp);
   }
-  return { track: t, scale, outside };
+  return { track: t, scale, outside, lo, hi };
 }
 
 function note(box, kind, text) {
@@ -1294,6 +1295,7 @@ function renderWorkday(plan) {
       ...d.plannedSlots.map((x) => ({ start: x.start, minutes: x.minutes, cls: "new", title: `${x.key} · ${fmtHM(x.start)}–${fmtHM(x.end)} (novo)` })),
     ];
     const tr = track(wd, segs);
+    if (MTG_ON) attachMeetings(tr, { date: d.date, readOnly: true });   // reuniões marcadas: para não apontar por cima
     box.append(tr.track, tr.scale);
     if (tr.outside) note(box, "info", `${fmtDur(tr.outside)} fora da jornada ${fmtHM(wd.start)}–${fmtHM(wd.end)} neste dia (mesmo dia, contam no teto).`);
   }
@@ -2208,6 +2210,7 @@ function teamLanes(people, range, d) {
       n.style.left = pos(now);
       tr.appendChild(n);
     }
+    if (MTG_ON && p.isMe) attachMeetings({ track: tr, lo: range.start, hi: range.end }, { date: d.date || todayISO(), now: d.live ? now : null, onChange: rerenderMeetings });
     const tot = document.createElement("b");
     tot.className = `t-lane-tot ${p.state}`;
     tot.textContent = p.total ? fmtDur(p.total) : "—";
@@ -2387,12 +2390,13 @@ function personBody(p, d, range) {
   body.appendChild(goals);
 
   /* linha do tempo do dia */
-  if (p.entries.length) {
+  if (p.entries.length || (MTG_ON && p.isMe)) {
     const colorOf = new Map(p.issues.map((it, i) => [it.key, ISSUE_COLORS[i % ISSUE_COLORS.length]]));
     const tr = track(range, p.entries.map((e) => ({
       start: e.start, minutes: e.minutes, color: colorOf.get(e.key),
       title: `${e.key} · ${fmtHM(e.start)}–${fmtHM(e.end)} · ${fmtDur(e.minutes)}`,
     })));
+    if (MTG_ON && p.isMe) attachMeetings(tr, { date: d.date || todayISO(), now: (d.date || todayISO()) === todayISO() ? nowMin() : null, onChange: rerenderMeetings });
     body.append(tr.track, tr.scale);
 
     /* demandas */
@@ -2582,7 +2586,8 @@ function renderDay(rawRep) {
   const box = $("dayBox");
   box.innerHTML = "";
   const { goal, cap, start, end } = rep.workday;
-  state.dayView = { date: rep.date, total: rep.total, goal };   // janela flutuante: o minimizado mostra o dia filtrado
+  const tot = rep.total + mtgMin(rep.date);   // apontado + reuniões marcadas
+  state.dayView = { date: rep.date, total: tot, goal };   // janela flutuante: o minimizado mostra o dia filtrado
   const colorOf = new Map(rep.issues.map((it, i) => [it.key, ISSUE_COLORS[i % ISSUE_COLORS.length]]));
 
   /* --- destaque: total x meta --- */
@@ -2596,33 +2601,36 @@ function renderDay(rawRep) {
   lbl.textContent = `${dayShort(rep.date)}${rep.date === todayISO() ? " · hoje" : ""}`;
   const big = document.createElement("div");
   big.className = "hero-num";
-  big.textContent = fmtDur(rep.total);
+  big.textContent = fmtDur(tot);
   const small = document.createElement("small");
   small.textContent = `de ${fmtDur(goal)}`;
   big.appendChild(small);
   num.append(lbl, big);
 
   const badge = document.createElement("span");
-  if (rep.overCap) { badge.className = "badge err"; badge.textContent = `Passou do teto de ${fmtDur(cap)}`; }
-  else if (rep.goalMet) { badge.className = "badge ok"; badge.textContent = rep.total > goal ? `✓ Meta batida · +${fmtDur(rep.total - goal)}` : "✓ Meta batida"; }
-  else if (rep.total) { badge.className = "badge warn"; badge.textContent = `Faltam ${fmtDur(goal - rep.total)} para a meta`; }
+  if (tot > cap) { badge.className = "badge err"; badge.textContent = `Passou do teto de ${fmtDur(cap)}`; }
+  else if (tot >= goal) { badge.className = "badge ok"; badge.textContent = tot > goal ? `✓ Meta batida · +${fmtDur(tot - goal)}` : "✓ Meta batida"; }
+  else if (tot) { badge.className = "badge warn"; badge.textContent = `Faltam ${fmtDur(goal - tot)} para a meta`; }
   else { badge.className = "badge warn"; badge.textContent = "Nada apontado"; }
   top.append(num, badge);
   hero.appendChild(top);
-  hero.appendChild(meter({ before: rep.total, add: 0, cap, goal, doneColor: true }));
+  hero.appendChild(meter({ before: tot, add: 0, cap, goal, doneColor: true }));
 
   const segs = rep.entries.map((e) => ({
     start: e.start, minutes: e.minutes, color: colorOf.get(e.key),
     title: `${e.key} · ${fmtHM(e.start)}–${fmtHM(e.end)} · ${fmtDur(e.minutes)}`,
   }));
   const tr = track({ start, end }, segs);
+  if (MTG_ON) attachMeetings(tr, { date: rep.date, now: rep.date === todayISO() ? nowMin() : null, onChange: rerenderMeetings });
   hero.append(tr.track, tr.scale);
   const sub = document.createElement("div");
   sub.className = "legend";
-  sub.textContent = `${rep.issues.length} demanda${rep.issues.length === 1 ? "" : "s"} · teto ${fmtDur(cap)} · livre ${fmtDur(Math.max(0, cap - rep.total))}`;
+  const mtgD = tot - rep.total;
+  sub.textContent = `${rep.issues.length} demanda${rep.issues.length === 1 ? "" : "s"}${mtgD ? ` · ${fmtDur(mtgD)} em reuniões` : ""} · teto ${fmtDur(cap)} · livre ${fmtDur(Math.max(0, cap - tot))}`;
   hero.appendChild(sub);
   if (tr.outside) note(hero, "info", `${fmtDur(tr.outside)} fora da jornada ${fmtHM(start)}–${fmtHM(end)} (área hachurada).`);
   box.appendChild(hero);
+  if (MTG_ON) box.appendChild(meetingsCard(rep.date, { onChange: rerenderMeetings }));
 
   /* --- demandas do dia --- */
   const list = document.createElement("div");
@@ -2720,7 +2728,19 @@ $("dayDate").addEventListener("change", () => { const v = $("dayDate").value; if
 
 /* ---------- pílula do topo ---------- */
 
+/* Reuniões na linha do tempo (teste, nos 4 perfis): contam na meta do dia se a opção estiver ligada. */
+const MTG_ON = true;
+const mtgMin = (date) => (MTG_ON ? meetingMinutes(date) : 0);
+function rerenderMeetings() {
+  if (state.mode === "day" && state.dayRep) renderDay(state.dayRep);
+  if (state.mode === "today" && DV.prog) renderToday();
+  if (state.mode === "team" && typeof renderTeam === "function") renderTeam();
+  refreshDayPill();
+}
+if (MTG_ON) { loadMeetings().then(rerenderMeetings); onMeetingsChange(rerenderMeetings); }
+
 function updateDayPill(total, goal) {
+  total += mtgMin(todayISO());
   const C = 94.25;
   $("ringFg").style.strokeDashoffset = String(C * (1 - Math.min(1, total / goal)));
   $("dayPillVal").textContent = fmtDur(total);
@@ -3337,27 +3357,30 @@ function renderToday() {
   const colorOf = new Map(issues.map((it, i) => [it.key, ISSUE_COLORS[i % ISSUE_COLORS.length]]));
   const avg = averageBefore(prog, d, 10);
   const streak = streakAt(prog, d);
-  DV.view = { date: d, total, goal };   // janela flutuante: o minimizado mostra o dia filtrado
+  const mtg = mtgMin(d);                  // reuniões marcadas na linha do tempo
+  const gt = total + mtg;                 // o que conta na meta
+  DV.view = { date: d, total: gt, goal };   // janela flutuante: o minimizado mostra o dia filtrado
 
   /* --- herói --- */
   const hero = el("div", "card dv-hero");
-  hero.appendChild(bigRing(total, goal, cap));
+  hero.appendChild(bigRing(gt, goal, cap));
   const side = el("div", "dv-hero-side");
   side.appendChild(el("div", "muted xs", `${dayShort(d)}${isToday ? " · hoje" : d === addDaysIso(today, -1) ? " · ontem" : ""}${gspace.project ? ` · só ${gspace.project}` : ""}`));
   let title, sub, tone = "";
   const now = nowMin();
-  if (total > cap) { title = "Passou do teto"; sub = `${fmtDur(total - cap)} acima de ${fmtDur(cap)}.`; tone = "err"; }
-  else if (total >= goal) { title = isToday ? "Meta batida! 🎉" : "Meta batida ✓"; sub = total > goal ? `${fmtDur(total - goal)} além da meta.` : "Na medida certa."; tone = "ok"; }
-  else if (!total) { title = isToday ? (now < ws ? "O dia ainda não começou" : "Nada apontado ainda") : "Dia sem apontamento"; sub = isToday ? `Meta de hoje: ${fmtDur(goal)}.` : ""; tone = isToday ? "" : "warn"; }
+  if (gt > cap) { title = "Passou do teto"; sub = `${fmtDur(gt - cap)} acima de ${fmtDur(cap)}.`; tone = "err"; }
+  else if (gt >= goal) { title = isToday ? "Meta batida! 🎉" : "Meta batida ✓"; sub = gt > goal ? `${fmtDur(gt - goal)} além da meta.` : "Na medida certa."; tone = "ok"; }
+  else if (!gt) { title = isToday ? (now < ws ? "O dia ainda não começou" : "Nada apontado ainda") : "Dia sem apontamento"; sub = isToday ? `Meta de hoje: ${fmtDur(goal)}.` : ""; tone = isToday ? "" : "warn"; }
   else if (isToday) {
-    const left = goal - total;
+    const left = goal - gt;
     const rest = Math.max(0, we - Math.max(now, ws));
     title = `Faltam ${fmtDur(left)}`;
     sub = rest >= left ? `Dá tempo: restam ${fmtDur(rest)} de jornada (até ${fmtHM(we)}).` : rest ? `Restam só ${fmtDur(rest)} de jornada até ${fmtHM(we)}.` : `A jornada terminou às ${fmtHM(we)}.`;
     tone = rest >= left ? "" : "warn";
-  } else { title = `Ficou ${fmtDur(goal - total)} abaixo`; sub = `Meta ${fmtDur(goal)}.`; tone = "warn"; }
+  } else { title = `Ficou ${fmtDur(goal - gt)} abaixo`; sub = `Meta ${fmtDur(goal)}.`; tone = "warn"; }
   side.append(el("div", `dv-title ${tone}`, title));
   if (sub) side.append(el("div", "dv-sub", sub));
+  if (mtg) side.append(el("div", "dv-sub", `${fmtDur(total)} apontadas + ${fmtDur(mtg)} em reuniões`));
 
   const chips = el("div", "chips-row");
   if (DV.prefs.streak) {
@@ -3389,7 +3412,7 @@ function renderToday() {
   }
 
   /* --- linha do tempo --- */
-  if (DV.prefs.timeline && entries.length) {
+  if (DV.prefs.timeline && (entries.length || MTG_ON)) {
     const card = mCard("Linha do tempo", `${fmtHM(ws)}–${fmtHM(we)}`);
     const tr = track({ start: ws, end: we }, entries.map((e) => ({
       start: e.start, minutes: e.minutes, color: colorOf.get(e.key),
@@ -3403,8 +3426,10 @@ function renderToday() {
       nowLine.dataset.tip = `agora · ${fmtHM(now)}`;
       tr.track.appendChild(nowLine);
     }
+    if (MTG_ON) attachMeetings(tr, { date: d, now: isToday ? now : null, onChange: rerenderMeetings });
     card.append(tr.track, tr.scale);
     box.appendChild(card);
+    if (MTG_ON) box.appendChild(meetingsCard(d, { onChange: rerenderMeetings }));
   }
 
   /* --- demandas do dia --- */

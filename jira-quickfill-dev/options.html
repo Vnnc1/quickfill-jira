@@ -91,6 +91,28 @@
     </section>
 
     <!-- Equipe -->
+    <section class="card" id="reunioes">
+      <h2>Reuniões e alinhamentos</h2>
+      <p class="help">Marque daily, alinhamentos e reuniões arrastando a bolinha azul da linha do tempo (Meu dia, Hoje e Equipe). Ficam guardados só neste navegador; estes ajustes salvam na hora.</p>
+      <div class="checks">
+        <label class="chk"><input type="checkbox" id="mtgDot" /><span>Mostrar a bolinha para marcar reuniões na linha do tempo</span></label>
+        <label class="chk"><input type="checkbox" id="mtgGoal" /><span>Contar reuniões na meta do dia</span></label>
+      </div>
+      <label class="field mtg-dur-field"><span>Duração ao marcar</span>
+        <select id="mtgDur" class="inp"><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">1 h</option></select>
+      </label>
+      <div class="mtg-hist">
+        <div class="mtg-filters" id="mtgTypes"></div>
+        <div class="row-btns">
+          <select id="mtgPeriod" class="inp mtg-period"><option value="7">Últimos 7 dias</option><option value="30" selected>Últimos 30 dias</option><option value="90">Últimos 90 dias</option><option value="all">Tudo</option></select>
+          <span class="grow"></span>
+          <button class="btn" id="mtgCsv" type="button">Exportar CSV</button>
+        </div>
+        <div class="mtg-sum" id="mtgSum"></div>
+        <div class="mtg-list" id="mtgList"></div>
+      </div>
+    </section>
+
     <section class="card">
       <h2>Equipe</h2>
       <div class="grid4">
@@ -292,5 +314,6 @@
     </footer>
   </div>
   <script type="module" src="options.js"></script>
+  <script type="module" src="lib/meetings-options.js"></script>
 </body>
 </html>
