@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Jira QuickFill DEV — Meu progresso",
-  "version": "4.6.0",
+  "version": "4.8.2",
   "description": "DEV: seu dia e seu progresso no Jira — meta do dia, sequência, histórico, suas demandas (com o QA, voltaram, entregues) e a equipe.",
   "permissions": [
     "storage",

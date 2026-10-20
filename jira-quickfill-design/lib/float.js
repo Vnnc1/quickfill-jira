@@ -316,7 +316,10 @@ const C = 94.25;
 let api = null;
 // "visível" pela marcação (no minimizado o resto da tela está escondido de propósito)
 const visible = (el) => el && !el.closest(".hidden, .role-off, [hidden]");
-const tabLabel = (mode) => document.querySelector(`.tab[data-mode="${mode}"]`)?.textContent.trim() || "QuickFill";
+const tabLabel = (mode) => {
+  const t = document.querySelector(`.tab[data-mode="${mode}"]`);
+  return (t && getComputedStyle(t).display !== "none" && t.textContent.trim()) || "QuickFill";   // aba de outro perfil: só o nome
+};
 
 /** Filtros ativos: Espaço/Período do topo e o primeiro seletor da aba. */
 function filters(mode) {

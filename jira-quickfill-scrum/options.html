@@ -93,7 +93,7 @@
     <!-- Equipe -->
     <section class="card" id="reunioes">
       <h2>Reuniões e alinhamentos</h2>
-      <p class="help">Marque daily, alinhamentos e reuniões arrastando a bolinha + da linha do tempo (Meu dia, Hoje, Tarefa e Equipe). Alinhamentos e reuniões podem virar demanda no Jira; a daily fica só aqui. Ficam guardados só neste navegador; estes ajustes salvam na hora.</p>
+      <p class="help">Marque alinhamentos, reuniões e outros (como a daily) arrastando a bolinha + da linha do tempo (Meu dia, Hoje, Tarefa e Equipe). Ficam guardados só neste navegador; só viram demanda no Jira se você marcar essa opção ao salvar. Estes ajustes salvam na hora.</p>
       <div class="checks">
         <label class="chk"><input type="checkbox" id="mtgDot" /><span>Mostrar a bolinha para marcar reuniões na linha do tempo</span></label>
         <label class="chk"><input type="checkbox" id="mtgGoal" /><span>Contar reuniões na meta do dia</span></label>
@@ -101,16 +101,33 @@
       <label class="field mtg-dur-field"><span>Duração ao marcar</span>
         <select id="mtgDur" class="inp"><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">1 h</option></select>
       </label>
-      <div class="mtg-hist">
-        <div class="mtg-filters" id="mtgTypes"></div>
-        <div class="row-btns">
-          <select id="mtgPeriod" class="inp mtg-period"><option value="7">Últimos 7 dias</option><option value="30" selected>Últimos 30 dias</option><option value="90">Últimos 90 dias</option><option value="all">Tudo</option></select>
-          <span class="grow"></span>
-          <button class="btn" id="mtgCsv" type="button">Exportar CSV</button>
-        </div>
-        <div class="mtg-sum" id="mtgSum"></div>
-        <div class="mtg-list" id="mtgList"></div>
+    </section>
+
+    <section class="card" id="modelos">
+      <h2>Modelos de reunião</h2>
+      <p class="help">Aparecem no topo do + da linha do tempo: um clique preenche tipo, título, duração e se vira demanda no Jira. Mudanças salvam na hora.</p>
+      <div class="tpl-list" id="tplList"></div>
+      <div class="row-btns">
+        <button class="btn" id="tplAdd" type="button">Novo modelo</button>
+        <span class="grow"></span>
+        <button class="btn ghost" id="tplReset" type="button">Voltar aos modelos do perfil</button>
       </div>
+    </section>
+
+    <section class="card" id="historico">
+      <h2>Histórico da linha do tempo</h2>
+      <div class="hist-tabs" role="tablist" aria-label="O que mostrar">
+        <button type="button" role="tab" data-tab="mine">Minhas</button>
+        <button type="button" role="tab" data-tab="log">Alterações</button>
+      </div>
+      <div class="row-btns hist-bar">
+        <select id="mtgPeriod" class="inp mtg-period" aria-label="Período"><option value="7">Últimos 7 dias</option><option value="30" selected>Últimos 30 dias</option><option value="90">Últimos 90 dias</option><option value="all">Tudo</option></select>
+        <span class="grow"></span>
+        <button class="btn" id="mtgCsv" type="button">Exportar CSV</button>
+      </div>
+      <div class="mtg-filters" id="mtgTypes"></div>
+      <div class="hist-sum" id="mtgSum"></div>
+      <div class="mtg-list" id="mtgList"></div>
     </section>
 
     <section class="card">

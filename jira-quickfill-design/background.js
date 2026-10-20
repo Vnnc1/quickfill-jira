@@ -2,6 +2,7 @@ import { parseDuration, formatJira, pickEstimate } from "./lib/duration.js";
 import { buildPlan, parseHM, addDays, fmtHM, fmtDur, DEFAULT_WORKDAY } from "./lib/schedule.js";
 import { ROLE, UPDATE_URL } from "./lib/role.js";
 import { stageFrom, termsRx, normName } from "./lib/teamstats.js";
+import { classifyIssue, categoryText, meetingTypeOf } from "./lib/meeting-detect.js";
 
 /* ------------------------------------------------------------------ */
 /* Configuração                                                        */
@@ -1713,7 +1714,7 @@ async function sprintsByJql(project, cfg) {
   return {
     active: all.filter((x) => x.state === "active"),
     future: all.filter((x) => x.state === "future").sort((a, b) => (a.start || "9999").localeCompare(b.start || "9999")),
-    recent: all.filter((x) => x.state === "closed" && x.start).sort((a, b) => (b.end || "").localeCompare(a.end || "")).slice(0, 3),
+    recent: all.filter((x) => x.state === "closed" && x.start).sort((a, b) => (b.end || "").localeCompare(a.end || "")).slice(0, 12),
   };
 }
 
@@ -1734,7 +1735,7 @@ async function closedSprints(boardId, cfg) {
     .map((x) => ({ id: x.id, name: x.name, state: "closed", start: sprintDate(x.startDate), end: sprintDate(x.completeDate || x.endDate) }))
     .filter((x) => x.start)
     .sort((a, b) => (b.end || "").localeCompare(a.end || ""))
-    .slice(0, 3);
+    .slice(0, 12);
   _closedCache.set(boardId, { at: Date.now(), data });
   return data;
 }
@@ -1800,9 +1801,10 @@ async function sprintInfo(p = {}) {
           recent = recent.length ? recent : viaJql.recent;
         }
       }
-      if (!active.length && !recent.length) return { ...sp, active: [], recent: [], next: future[0] || null, error: `Nenhuma sprint encontrada para ${sp.project} (nem no quadro, nem nas demandas).` };
+      if (!active.length && !recent.length) return { ...sp, active: [], recent: [], closed: [], next: future[0] || null, error: `Nenhuma sprint encontrada para ${sp.project} (nem no quadro, nem nas demandas).` };
       for (const a of active) Object.assign(a, await sprintIssues(a.id, me, cfg));
-      return { ...sp, board: board ? { id: board.id, name: board.name } : null, source, active, next: future[0] || null, recent };
+      // recent: as 3 últimas (velocidade); closed: até 12, para ver uma sprint anterior no SCRUM
+      return { ...sp, board: board ? { id: board.id, name: board.name } : null, source, active, next: future[0] || null, recent: recent.slice(0, 3), closed: recent };
     } catch (e) {
       return { ...sp, active: [], recent: [], error: e.message };
     }
@@ -2225,6 +2227,45 @@ const statusTransitions = (histories) => {
   return out.sort((a, b) => a.at - b.at);
 };
 
+/**
+ * Histórico da demanda (botão "Histórico" das listas): todas as mudanças de status com a etapa
+ * de cada uma no quadro do espaço, quem fez e os comentários (para explicar as voltas).
+ */
+async function issueHistory(p = {}) {
+  const cfg = await getConfig();
+  assertConfigured(cfg);
+  const key = normalizeKey(p.key);
+  const fields = "summary,issuetype,parent,created,creator,reporter,status,project";
+  const [issue, logs, meta, comments] = await Promise.all([
+    jira(`/rest/api/3/issue/${encodeURIComponent(key)}?fields=${fields}`, { cfg }),
+    fullChangelog(key, cfg),
+    statusMeta(cfg),
+    jira(`/rest/api/3/issue/${encodeURIComponent(key)}/comment?maxResults=100&orderBy=created`, { cfg }).catch(() => null),
+  ]);
+  const f = issue?.fields || {};
+  const project = f.project?.key || key.split("-")[0];
+  const spaces = await qaSpaces(cfg, meta).catch(() => []);
+  const kinds = spaces.find((s) => s.project === project)?.kinds || {};
+  const R = stageRules(cfg);
+  const kindOf = (id, name) => kinds[id]?.kind || (meta[id]?.cat === "done" ? "done" : columnKind(name || meta[id]?.name || "", R));
+  const stageOfId = (id, name) => stageFrom(kindOf(id, name), meta[id]?.cat);
+  const st = f.status || {};
+  const who = f.creator || f.reporter;
+  return {
+    key, url: `${cfg.baseUrl}/browse/${key}`,
+    summary: f.summary || "", type: f.issuetype?.name || "", parentKey: f.parent?.key || null,
+    created: Date.parse(f.created) || null,
+    creator: who ? { id: who.accountId || "", name: who.displayName || "" } : null,
+    status: { name: st.name || "", stage: stageOfId(String(st.id || ""), st.name) },
+    transitions: statusTransitions(logs).map((t) => ({ ...t,
+      fromKind: kindOf(t.from, t.fromName), toKind: kindOf(t.to, t.toName),
+      fromStage: stageOfId(t.from, t.fromName), toStage: stageOfId(t.to, t.toName) })),
+    comments: (comments?.comments || []).map((c) => ({
+      at: Date.parse(c.created), by: c.author?.accountId || "", byName: c.author?.displayName || "", text: adfExcerpt(c.body, 220),
+    })),
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* QuickFill DEV — minhas demandas                                     */
 /* ------------------------------------------------------------------ */
@@ -2412,6 +2453,7 @@ async function completeLogs(raw, cfg, limit = 40) {
 /* ------------------------------------------------------------------ */
 
 const _scrum = { at: 0, data: null, pending: null };
+const _scrumPast = new Map();   // id da sprint encerrada -> { at, data }: não muda mais, guarda por 10 min
 /** Lista de pessoas salva nas Opções (JSON). `byName`: aceita entradas só com o nome. */
 const parseDeployers = (raw, byName = false) => { try { const v = JSON.parse(raw || "[]"); return Array.isArray(v) ? v.filter((x) => x?.accountId || (byName && x?.name)) : []; } catch { return []; } };
 const _velocity = new Map();   // sprintId -> { at, data } (sprints encerradas quase não mudam)
@@ -2431,10 +2473,33 @@ async function closedSprintStats(sprint, fx, cfg) {
   return data;
 }
 
+/**
+ * Sprint ativa de cada espaço (padrão) ou, com `p.sprint`, uma sprint anterior: os mesmos dados
+ * (itens, subtarefas, histórico), só que da sprint encerrada escolhida. Os outros espaços vêm vazios.
+ */
 async function scrumSprint(p = {}) {
+  const pastId = p.sprint ? String(p.sprint) : "";
+  if (pastId) {
+    const hit = _scrumPast.get(pastId);
+    if (!p.force && hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.data;
+    const data = await scrumSprintLoad({ ...p, sprint: pastId });
+    _scrumPast.set(pastId, { at: Date.now(), data });
+    return data;
+  }
   if (!p.force && _scrum.data && Date.now() - _scrum.at < 60 * 1000) return _scrum.data;
   if (_scrum.pending) return _scrum.pending;
-  _scrum.pending = (async () => {
+  _scrum.pending = scrumSprintLoad(p);
+  try {
+    const data = await _scrum.pending;
+    _scrum.at = Date.now();
+    _scrum.data = data;
+    return data;
+  } finally { _scrum.pending = null; }
+}
+
+async function scrumSprintLoad(p = {}) {
+  const pastId = p.sprint ? String(p.sprint) : "";
+  return (async () => {
     const cfg = await getConfig();
     const [info, meta, prios, fx, me] = await Promise.all([
       sprintInfo({ force: p.force }), statusMeta(cfg), priorityList(cfg), extraFields(cfg), getMyself(cfg)]);
@@ -2445,7 +2510,8 @@ async function scrumSprint(p = {}) {
     const spaces = await Promise.all(info.spaces.map(async (sp) => {
       const kinds = qa.find((s) => s.project === sp.project)?.kinds || {};
       try {
-        const sprints = await Promise.all((sp.active || []).map(async (a) => {
+        const chosen = pastId ? (sp.closed || []).filter((x) => String(x.id) === pastId) : (sp.active || []);
+        const sprints = await Promise.all(chosen.map(async (a) => {
           const raw = await searchWithChangelog(`sprint = ${Number(a.id)} ORDER BY rank ASC`, fields, 400, cfg);
           const have = new Set(raw.map((i) => i.key));
           const parents = raw.filter((i) => !i.fields?.issuetype?.subtask).map((i) => i.key);
@@ -2456,21 +2522,21 @@ async function scrumSprint(p = {}) {
           }
           const logs = await completeLogs(raw, cfg);
           return {
-            id: a.id, name: a.name, goal: a.goal || "", start: a.start, end: a.end,
+            id: a.id, name: a.name, goal: a.goal || "", start: a.start, end: a.end, closed: !!pastId,
             issues: raw.map((i) => boardIssue(i, { fx, rankOf, kinds, logs, meta })),
             truncated: raw.length >= 400,
           };
         }));
         const velocity = await Promise.all((sp.recent || []).map((r) => closedSprintStats(r, fx, cfg)));
         return { project: sp.project, label: sp.label, board: sp.board || null, source: sp.source || null,
-          error: sp.error || null, next: sp.next || null, sprints, velocity };
+          error: sp.error || null, next: sp.next || null, sprints, velocity, closed: sp.closed || [] };
       } catch (e) {
-        return { project: sp.project, label: sp.label, error: e.message, sprints: [], velocity: [] };
+        return { project: sp.project, label: sp.label, error: e.message, sprints: [], velocity: [], closed: sp.closed || [] };
       }
     }));
 
     return {
-      generatedAt: Date.now(), today: todayLocal(), url: cfg.baseUrl,
+      generatedAt: Date.now(), today: todayLocal(), url: cfg.baseUrl, past: pastId || null,
       me: { accountId: me.accountId, name: me.displayName },
       fields: { points: !!fx.points, flagged: !!fx.flagged },
       settings: {
@@ -2487,12 +2553,6 @@ async function scrumSprint(p = {}) {
       priorities: prios, spaces,
     };
   })();
-  try {
-    const data = await _scrum.pending;
-    _scrum.at = Date.now();
-    _scrum.data = data;
-    return data;
-  } finally { _scrum.pending = null; }
 }
 
 /* ------------------------------------------------------------------ */
@@ -2638,72 +2698,6 @@ async function relatesLinkType(cfg) {
  * listados na descrição, vinculados ("relacionado a") e, se pedido, na sprint ativa.
  */
 /**
- * Histórico de uma demanda para o modal "Histórico": cada mudança de status (de onde, para onde,
- * quando e quem), a etapa do quadro de cada status (pelas colunas configuradas no quadro do espaço)
- * e, nas voltas, o comentário feito na hora como motivo.
- */
-async function issueHistory(p = {}) {
-  const cfg = await getConfig();
-  const key = normalizeKey(p.key);
-  if (!key) throw new Error("Demanda não informada.");
-  const [meta, issue] = await Promise.all([
-    statusMeta(cfg),
-    jira(`/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,status,issuetype,created,reporter,creator,parent,project,priority,assignee`, { cfg }),
-  ]);
-  const f = issue.fields || {};
-  const values = [];
-  for (let startAt = 0; startAt < 2000;) {
-    const page = await jira(`/rest/api/3/issue/${encodeURIComponent(key)}/changelog?startAt=${startAt}&maxResults=100`, { cfg });
-    const batch = page?.values || page?.histories || [];
-    values.push(...batch);
-    startAt += batch.length;
-    if (!batch.length || page.isLast || startAt >= (page.total ?? startAt)) break;
-  }
-  let comments = [];
-  try {
-    const c = await jira(`/rest/api/3/issue/${encodeURIComponent(key)}/comment?maxResults=100&orderBy=created`, { cfg });
-    comments = (c?.comments || []).map((x) => ({ at: Date.parse(x.created), by: x.author?.accountId || "", text: adfExcerpt(x.body, 220) }));
-  } catch { /* sem comentários */ }
-
-  const spaces = await qaSpaces(cfg, meta).catch(() => []);
-  const kinds = spaces.find((sp) => sp.project === f.project?.key)?.kinds || {};
-  const R = stageRules(cfg);
-  const stageOfStatus = (id, name) => {
-    const cat = meta[String(id)]?.cat || "indeterminate";
-    const kind = kinds[String(id)]?.kind || (cat === "done" ? "done" : columnKind(name || meta[String(id)]?.name || "", R));
-    return stageFrom(kind, cat);
-  };
-
-  const transitions = [];
-  for (const h of values) {
-    for (const it of h.items || []) {
-      if (it.field !== "status" && it.fieldId !== "status") continue;
-      const at = Date.parse(h.created);
-      const by = h.author?.accountId || "";
-      // motivo: comentário da mesma pessoa até 2h depois (ou 15 min antes) da mudança
-      const note = comments.find((c) => c.by === by && c.at >= at - 15 * 60000 && c.at <= at + 2 * 3600000)?.text || "";
-      transitions.push({
-        at, by, byName: h.author?.displayName || "",
-        from: String(it.from || ""), fromName: it.fromString || "", to: String(it.to || ""), toName: it.toString || "",
-        fromStage: stageOfStatus(it.from, it.fromString), toStage: stageOfStatus(it.to, it.toString), note,
-      });
-    }
-  }
-  transitions.sort((a, b) => a.at - b.at);
-  const first = transitions[0];
-  const st = f.status || {};
-  return {
-    key, url: `${cfg.baseUrl}/browse/${key}`, summary: f.summary || "", type: f.issuetype?.name || "",
-    isSubtask: !!f.issuetype?.subtask, parentKey: f.parent?.key || null, priority: f.priority?.name || "",
-    assignee: f.assignee?.displayName || "",
-    created: Date.parse(f.created), createdBy: (f.creator || f.reporter)?.displayName || "",
-    createdStatus: first ? first.fromName : st.name || "", createdStage: first ? first.fromStage : stageOfStatus(st.id, st.name),
-    status: { name: st.name || "", stage: stageOfStatus(st.id, st.name) },
-    transitions, now: Date.now(),
-  };
-}
-
-/**
  * Reunião/alinhamento marcado na linha do tempo → cria uma Tarefa no Jira atribuída a você
  * e aplica datas, story points, status e o tempo da reunião como apontamento (mesmo fluxo do QA).
  */
@@ -2732,6 +2726,17 @@ async function createMeetingIssue(p = {}) {
     steps.push({ step: `Demanda criada (${type.name})`, ok: true });
     try { await jira(`/rest/api/3/issue/${created.key}/assignee`, { method: "PUT", cfg, body: { accountId: me.accountId } }); }
     catch (e2) { steps.push({ step: "Atribuição", ok: false, detail: e2.message }); }
+  }
+
+  if (p.categoryId) {
+    const cat = await categoryField(cfg);
+    if (!cat) steps.push({ step: "Categoria", ok: false, detail: "Campo Categoria não encontrado no Jira." });
+    else {
+      try {
+        await jira(`/rest/api/3/issue/${created.key}`, { method: "PUT", cfg, body: { fields: { [cat.id]: cat.multi ? [{ id: String(p.categoryId) }] : { id: String(p.categoryId) } } } });
+        steps.push({ step: "Categoria preenchida", ok: true });
+      } catch (e) { steps.push({ step: "Categoria", ok: false, detail: e.message }); }
+    }
   }
 
   const ctx = await loadSubtaskContext(created.key);
@@ -2919,6 +2924,118 @@ async function handoffSave(p = {}) {
   return value;
 }
 
+/* ------------------------------------------------------------------ */
+/* Reuniões reconhecidas nas demandas do Jira (só leitura)             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Demandas que foram reuniões ou execução (Planning, alinhamentos, deploy, testes…) reconhecidas pela
+ * Categoria do Jira e, sem categoria, pelo título ou,
+ * sem pista no título, pela descrição (lib/meeting-detect.js). Nada é gravado no Jira.
+ */
+/** Campo "Categoria" das demandas (customfield), achado pelo nome. null se o Jira não tiver. */
+let _catField;
+async function categoryField(cfg) {
+  if (_catField !== undefined) return _catField;
+  try {
+    const fields = await jira("/rest/api/3/field", { cfg });
+    const n = (x) => slug(x.name);
+    const f = (fields || []).find((x) => x.custom && ["categoria", "category", "categoria da demanda"].includes(n(x)))
+      || (fields || []).find((x) => x.custom && /^categoria/.test(n(x)));
+    _catField = f ? { id: f.id, name: f.name, multi: f.schema?.type === "array" } : null;
+  } catch { _catField = null; }
+  return _catField;
+}
+
+/** Opções do campo Categoria na Tarefa do projeto (para o modal de marcar), cada uma com o tipo que representa. */
+async function meetingCategoryOptions(p = {}) {
+  const cfg = await getConfig();
+  const project = String(p.project || cfg.defaultProject || "").toUpperCase();
+  const cat = await categoryField(cfg);
+  if (!cat || !project) return { fieldId: null, options: [] };
+  const type = await issueTypeByName(project, "Tarefa", cfg);
+  let meta = [];
+  try {
+    for (let startAt = 0; ; ) {
+      const page = await jira(`/rest/api/3/issue/createmeta/${encodeURIComponent(project)}/issuetypes/${type.id}?maxResults=200&startAt=${startAt}`, { cfg });
+      const list = page?.fields || page?.values || [];
+      meta = meta.concat(list);
+      startAt += list.length;
+      if (!list.length || startAt >= (page?.total ?? 0)) break;
+    }
+  } catch { meta = []; }
+  const f = meta.find((x) => (x.fieldId || x.key) === cat.id);
+  if (!f) return { fieldId: null, options: [] };
+  return {
+    fieldId: cat.id, name: cat.name, required: !!f.required,
+    options: (f.allowedValues || []).filter((o) => !o.disabled).map((o) => ({ id: String(o.id), value: o.value ?? o.name ?? "", type: meetingTypeOf(o.value ?? o.name)?.type || null })),
+  };
+}
+
+const _mtgClass = new Map();   // key -> { at, res }
+const MTG_CLASS_TTL = 10 * 60 * 1000;
+
+async function meetingClassify(p = {}) {
+  const cfg = await getConfig();
+  const keys = [...new Set((p.keys || []).map(String))].slice(0, 600);
+  const fresh = (k) => { const c = _mtgClass.get(k); return c && Date.now() - c.at < MTG_CLASS_TTL; };
+  const missing = keys.filter((k) => !fresh(k));
+  for (let i = 0; i < missing.length; i += 100) {
+    const chunk = missing.slice(i, i + 100);
+    const cat = await categoryField(cfg);
+    const issues = await runJql(`key in (${chunk.join(", ")})`, ["summary", "description", ...(cat ? [cat.id] : [])], chunk.length, cfg);
+    const found = new Set();
+    for (const it of issues) {
+      found.add(it.key);
+      const r = classifyIssue({ summary: it.fields?.summary, description: it.fields?.description, category: cat ? it.fields?.[cat.id] : null });
+      _mtgClass.set(it.key, { at: Date.now(), res: r ? { ...r, summary: it.fields?.summary || "" } : null });
+    }
+    for (const k of chunk) if (!found.has(k)) _mtgClass.set(k, { at: Date.now(), res: null });
+  }
+  const out = {};
+  for (const k of keys) { const r = _mtgClass.get(k)?.res; if (r) out[k] = r; }
+  return out;
+}
+
+const _personMtg = new Map();   // "conta|de|até" -> { at, data }
+
+/**
+ * Apontamentos de uma pessoa (você, se não vier accountId) em demandas que foram reuniões, no
+ * período: alimenta o histórico das Opções e o histórico de cada pessoa na aba Equipe › Reuniões.
+ */
+async function myMeetings(p = {}) {
+  const cfg = await getConfig();
+  const me = await getMyself(cfg);
+  const who = String(p.accountId || me.accountId);
+  const to = p.to || todayLocal();
+  const from = p.from || addDays(to, -29);
+  const ck = `${who}|${from}|${to}`;
+  const hit = _personMtg.get(ck);
+  if (!p.force && hit && Date.now() - hit.at < 2 * 60 * 1000) return hit.data;
+  const author = who === me.accountId ? "currentUser()" : jqlString(who);
+  const cat = await categoryField(cfg);
+  const issues = await runJql(`worklogAuthor = ${author} AND worklogDate >= "${from}" AND worklogDate <= "${to}"`,
+    ["summary", "description", "status", "worklog", ...(cat ? [cat.id] : [])], 500, cfg);
+  const items = [];
+  const matched = issues.map((it) => ({ it, r: classifyIssue({ summary: it.fields?.summary, description: it.fields?.description, category: cat ? it.fields?.[cat.id] : null }) })).filter((x) => x.r);
+  const res = await mapLimit(matched, 6, async ({ it }) => {
+    const raw = inlineWorklogs(it);
+    return raw ? toCacheLogs(it.key, raw, from, to) : issueWorklogs(it.key, from, to, cfg);
+  });
+  matched.forEach(({ it, r }, i) => {
+    if (!res[i].ok) return;
+    for (const w of res[i].value) {
+      if (w.accountId !== who) continue;
+      items.push({ id: `j${w.id}`, type: r.type, by: r.by, title: it.fields?.summary || it.key, date: w.date, start: w.start,
+        end: Math.min(24 * 60, w.start + w.minutes), jiraKey: it.key, jiraUrl: `${cfg.baseUrl}/browse/${it.key}`,
+        status: it.fields?.status?.name || "", category: r.category || (cat ? categoryText(it.fields?.[cat.id]) : ""), fromJira: true });
+    }
+  });
+  const data = { from, to, accountId: who, items, truncated: issues.length >= 500 };
+  _personMtg.set(ck, { at: Date.now(), data });
+  return data;
+}
+
 /** Chave do arquivo a partir do link do Figma (file/design/proto/board). */
 const figmaFileKey = (url) => String(url || "").match(/figma\.com\/(?:file|design|proto|board)\/([A-Za-z0-9]+)/)?.[1] || null;
 const _figma = { key: "", at: 0, data: null };
@@ -2971,6 +3088,7 @@ const HANDLERS = {
   SPRINT_INFO: (p) => sprintInfo(p),
   MY_PROGRESS: (p) => myProgress(p),
   MY_DEMANDS: (p) => myDemands(p),
+  ISSUE_HISTORY: (p) => issueHistory(p),
   SPRINT_KEYS: (p) => sprintKeys(p),
   SCRUM_SPRINT: (p) => scrumSprint(p),
   DESIGN_HUS: (p) => designHus(p),
@@ -2979,7 +3097,10 @@ const HANDLERS = {
   SAVE_SCRUM_SETTINGS: (p) => saveScrumSettings(p),
   CREATE_DEPLOY_CARD: (p) => createDeployCard(p),
   CREATE_MEETING_ISSUE: (p) => createMeetingIssue(p),
-  ISSUE_HISTORY: (p) => issueHistory(p),
+  MEETING_CLASSIFY: (p) => meetingClassify(p),
+  MY_MEETINGS: (p) => myMeetings(p),
+  PERSON_MEETINGS: (p) => myMeetings(p),
+  MEETING_CATEGORY_OPTIONS: (p) => meetingCategoryOptions(p),
   QA_QUEUE: (p) => qaQueue(p),
   POST_EVIDENCE: (p) => postEvidence(p),
   HANDOFF_GET: (p) => handoffGet(p),
