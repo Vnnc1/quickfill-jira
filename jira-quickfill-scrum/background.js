@@ -1714,7 +1714,7 @@ async function sprintsByJql(project, cfg) {
   return {
     active: all.filter((x) => x.state === "active"),
     future: all.filter((x) => x.state === "future").sort((a, b) => (a.start || "9999").localeCompare(b.start || "9999")),
-    recent: all.filter((x) => x.state === "closed" && x.start).sort((a, b) => (b.end || "").localeCompare(a.end || "")).slice(0, 3),
+    recent: all.filter((x) => x.state === "closed" && x.start).sort((a, b) => (b.end || "").localeCompare(a.end || "")).slice(0, 12),
   };
 }
 
@@ -1735,7 +1735,7 @@ async function closedSprints(boardId, cfg) {
     .map((x) => ({ id: x.id, name: x.name, state: "closed", start: sprintDate(x.startDate), end: sprintDate(x.completeDate || x.endDate) }))
     .filter((x) => x.start)
     .sort((a, b) => (b.end || "").localeCompare(a.end || ""))
-    .slice(0, 3);
+    .slice(0, 12);
   _closedCache.set(boardId, { at: Date.now(), data });
   return data;
 }
@@ -1801,9 +1801,10 @@ async function sprintInfo(p = {}) {
           recent = recent.length ? recent : viaJql.recent;
         }
       }
-      if (!active.length && !recent.length) return { ...sp, active: [], recent: [], next: future[0] || null, error: `Nenhuma sprint encontrada para ${sp.project} (nem no quadro, nem nas demandas).` };
+      if (!active.length && !recent.length) return { ...sp, active: [], recent: [], closed: [], next: future[0] || null, error: `Nenhuma sprint encontrada para ${sp.project} (nem no quadro, nem nas demandas).` };
       for (const a of active) Object.assign(a, await sprintIssues(a.id, me, cfg));
-      return { ...sp, board: board ? { id: board.id, name: board.name } : null, source, active, next: future[0] || null, recent };
+      // recent: as 3 últimas (velocidade); closed: até 12, para ver uma sprint anterior no SCRUM
+      return { ...sp, board: board ? { id: board.id, name: board.name } : null, source, active, next: future[0] || null, recent: recent.slice(0, 3), closed: recent };
     } catch (e) {
       return { ...sp, active: [], recent: [], error: e.message };
     }
@@ -2452,6 +2453,7 @@ async function completeLogs(raw, cfg, limit = 40) {
 /* ------------------------------------------------------------------ */
 
 const _scrum = { at: 0, data: null, pending: null };
+const _scrumPast = new Map();   // id da sprint encerrada -> { at, data }: não muda mais, guarda por 10 min
 /** Lista de pessoas salva nas Opções (JSON). `byName`: aceita entradas só com o nome. */
 const parseDeployers = (raw, byName = false) => { try { const v = JSON.parse(raw || "[]"); return Array.isArray(v) ? v.filter((x) => x?.accountId || (byName && x?.name)) : []; } catch { return []; } };
 const _velocity = new Map();   // sprintId -> { at, data } (sprints encerradas quase não mudam)
@@ -2471,10 +2473,33 @@ async function closedSprintStats(sprint, fx, cfg) {
   return data;
 }
 
+/**
+ * Sprint ativa de cada espaço (padrão) ou, com `p.sprint`, uma sprint anterior: os mesmos dados
+ * (itens, subtarefas, histórico), só que da sprint encerrada escolhida. Os outros espaços vêm vazios.
+ */
 async function scrumSprint(p = {}) {
+  const pastId = p.sprint ? String(p.sprint) : "";
+  if (pastId) {
+    const hit = _scrumPast.get(pastId);
+    if (!p.force && hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.data;
+    const data = await scrumSprintLoad({ ...p, sprint: pastId });
+    _scrumPast.set(pastId, { at: Date.now(), data });
+    return data;
+  }
   if (!p.force && _scrum.data && Date.now() - _scrum.at < 60 * 1000) return _scrum.data;
   if (_scrum.pending) return _scrum.pending;
-  _scrum.pending = (async () => {
+  _scrum.pending = scrumSprintLoad(p);
+  try {
+    const data = await _scrum.pending;
+    _scrum.at = Date.now();
+    _scrum.data = data;
+    return data;
+  } finally { _scrum.pending = null; }
+}
+
+async function scrumSprintLoad(p = {}) {
+  const pastId = p.sprint ? String(p.sprint) : "";
+  return (async () => {
     const cfg = await getConfig();
     const [info, meta, prios, fx, me] = await Promise.all([
       sprintInfo({ force: p.force }), statusMeta(cfg), priorityList(cfg), extraFields(cfg), getMyself(cfg)]);
@@ -2485,7 +2510,8 @@ async function scrumSprint(p = {}) {
     const spaces = await Promise.all(info.spaces.map(async (sp) => {
       const kinds = qa.find((s) => s.project === sp.project)?.kinds || {};
       try {
-        const sprints = await Promise.all((sp.active || []).map(async (a) => {
+        const chosen = pastId ? (sp.closed || []).filter((x) => String(x.id) === pastId) : (sp.active || []);
+        const sprints = await Promise.all(chosen.map(async (a) => {
           const raw = await searchWithChangelog(`sprint = ${Number(a.id)} ORDER BY rank ASC`, fields, 400, cfg);
           const have = new Set(raw.map((i) => i.key));
           const parents = raw.filter((i) => !i.fields?.issuetype?.subtask).map((i) => i.key);
@@ -2496,21 +2522,21 @@ async function scrumSprint(p = {}) {
           }
           const logs = await completeLogs(raw, cfg);
           return {
-            id: a.id, name: a.name, goal: a.goal || "", start: a.start, end: a.end,
+            id: a.id, name: a.name, goal: a.goal || "", start: a.start, end: a.end, closed: !!pastId,
             issues: raw.map((i) => boardIssue(i, { fx, rankOf, kinds, logs, meta })),
             truncated: raw.length >= 400,
           };
         }));
         const velocity = await Promise.all((sp.recent || []).map((r) => closedSprintStats(r, fx, cfg)));
         return { project: sp.project, label: sp.label, board: sp.board || null, source: sp.source || null,
-          error: sp.error || null, next: sp.next || null, sprints, velocity };
+          error: sp.error || null, next: sp.next || null, sprints, velocity, closed: sp.closed || [] };
       } catch (e) {
-        return { project: sp.project, label: sp.label, error: e.message, sprints: [], velocity: [] };
+        return { project: sp.project, label: sp.label, error: e.message, sprints: [], velocity: [], closed: sp.closed || [] };
       }
     }));
 
     return {
-      generatedAt: Date.now(), today: todayLocal(), url: cfg.baseUrl,
+      generatedAt: Date.now(), today: todayLocal(), url: cfg.baseUrl, past: pastId || null,
       me: { accountId: me.accountId, name: me.displayName },
       fields: { points: !!fx.points, flagged: !!fx.flagged },
       settings: {
@@ -2527,12 +2553,6 @@ async function scrumSprint(p = {}) {
       priorities: prios, spaces,
     };
   })();
-  try {
-    const data = await _scrum.pending;
-    _scrum.at = Date.now();
-    _scrum.data = data;
-    return data;
-  } finally { _scrum.pending = null; }
 }
 
 /* ------------------------------------------------------------------ */

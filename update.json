@@ -1,29 +1,29 @@
 {
-  "version": "4.8.0",
+  "version": "4.8.1",
   "private": false,
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "installCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/quickfill.ps1 | iex\"",
   "guide": "https://github.com/Vnnc1/quickfill-jira#readme",
   "date": "2026-10-20",
-  "notes": "Linha do tempo com Reuniões e Execução: no + há modelos do seu perfil (editáveis nas Opções) e, ao criar a demanda no Jira, o campo Categoria. Na Equipe, o filtro Reuniões | Execução mostra quem esteve em reunião, deploy, refinamento, configuração ou testes, com o histórico de cada pessoa; as demandas são reconhecidas pela Categoria ou pelo título, sem gravar nada no Jira. Histórico nas Opções mais claro, com o registro de alterações.",
+  "notes": "SCRUM: ao lado do Período, escolha uma sprint anterior (até as 12 últimas) para ver Sprint, Pessoas e Riscos com as demandas dela. Sprint atual volta ao padrão.",
   "packages": {
     "qa": {
-      "version": "4.8.0",
+      "version": "4.8.1",
       "folder": "jira-quickfill-qa",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-qa.zip"
     },
     "dev": {
-      "version": "4.8.0",
+      "version": "4.8.1",
       "folder": "jira-quickfill-dev",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-dev.zip"
     },
     "scrum": {
-      "version": "4.8.0",
+      "version": "4.8.1",
       "folder": "jira-quickfill-scrum",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-scrum.zip"
     },
     "design": {
-      "version": "4.8.0",
+      "version": "4.8.1",
       "folder": "jira-quickfill-design",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-design.zip"
     }

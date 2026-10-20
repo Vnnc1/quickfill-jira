@@ -1,6 +1,6 @@
 {
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "branch": "master",
-  "notes": "Linha do tempo com Reuniões e Execução: no + há modelos do seu perfil (editáveis nas Opções) e, ao criar a demanda no Jira, o campo Categoria. Na Equipe, o filtro Reuniões | Execução mostra quem esteve em reunião, deploy, refinamento, configuração ou testes, com o histórico de cada pessoa; as demandas são reconhecidas pela Categoria ou pelo título, sem gravar nada no Jira. Histórico nas Opções mais claro, com o registro de alterações.",
+  "notes": "SCRUM: ao lado do Período, escolha uma sprint anterior (até as 12 últimas) para ver Sprint, Pessoas e Riscos com as demandas dela. Sprint atual volta ao padrão.",
   "private": false
 }

@@ -4499,7 +4499,7 @@ const SC_PREF_LABELS = [
   ["stages", "Onde estão os itens"], ["period", "Resumo do período"], ["flow", "Métricas de fluxo"],
   ["burndown", "Burndown"], ["tree", "Itens e subtarefas"], ["velocity", "Velocidade das últimas sprints"],
 ];
-const SC = { data: null, seq: 0, unit: "items", sort: "load", q: "", users: new Map(), treeAll: false, period: "sprint", prefs: { ...SC_PREFS_DEFAULT },
+const SC = { data: null, seq: 0, unit: "items", sort: "load", q: "", users: new Map(), treeAll: false, period: "sprint", sprintId: "", prefs: { ...SC_PREFS_DEFAULT },
   pOpen: new Set(), pStage: new Map(), unOpen: true };
 try { SC.unOpen = localStorage.getItem("qf.unOpen") !== "0"; } catch { /* sem storage */ }
 try {
@@ -4512,7 +4512,7 @@ const PERIOD_LABEL = { sprint: "na sprint", today: "hoje", 7: "nos últimos 7 di
 
 /** Início do período escolhido (Sprint · Hoje · 7 · 14 dias). */
 function scFrom(sprint) {
-  if (SC.period === "sprint") return sprint?.start ? Date.parse(`${sprint.start}T00:00:00`) : 0;
+  if (SC.period === "sprint" || SC.data?.past) return sprint?.start ? Date.parse(`${sprint.start}T00:00:00`) : 0;
   const n = SC.period === "today" ? 1 : Number(SC.period);
   return Date.parse(`${addDaysIso(todayISO(), -(n - 1))}T00:00:00`);
 }
@@ -4557,14 +4557,14 @@ async function loadScrum({ force = false } = {}) {
       if (scrumData?.spaces && !SC.data) { SC.data = withScrumDefaults(scrumData); renderScrum(); }
     } catch { /* sem cache */ }
   }
-  if (canSkipFetch(SC.data, force)) { renderScrum(); return; }   // voltando de onde parou: usa o que já estava
+  if (String(SC.data?.past || "") === SC.sprintId && canSkipFetch(SC.data, force)) { renderScrum(); return; }   // voltando de onde parou: usa o que já estava
   for (const id of ["scInfo", "rkInfo"]) $(id).textContent = SC.data ? "atualizando…" : "";
   if (!SC.data) scBoxes().forEach((b) => { b.innerHTML = `<p class="muted xs">Lendo as sprints do Jira…</p>`; });
   try {
-    const data = await send("SCRUM_SPRINT", { force });
+    const data = await send("SCRUM_SPRINT", { force, sprint: SC.sprintId || undefined });
     if (seq !== SC.seq) return;
     SC.data = withScrumDefaults(data);
-    chrome.storage.local.set({ scrumData: data }).catch(() => {});
+    if (!data.past) chrome.storage.local.set({ scrumData: data }).catch(() => {});   // o cache guarda só a sprint atual
     renderScrum();
   } catch (e) {
     if (seq !== SC.seq) return;
@@ -4575,7 +4575,9 @@ async function loadScrum({ force = false } = {}) {
 
 function renderScrum() {
   if (!SC.data) return;
-  const info = `atualizado ${since(SC.data.generatedAt)}`;
+  paintSprintPick();
+  const past = scPastSprint();
+  const info = past ? `${past.name}, encerrada em ${dayShort(past.end || past.start)} · situação de agora dos itens` : `atualizado ${since(SC.data.generatedAt)}`;
   $("scInfo").textContent = info;
   $("rkInfo").textContent = info;
   if (state.mode === "sprint") renderSprint();
@@ -4587,7 +4589,8 @@ function scEmpty(box) {
   const errs = (SC.data?.spaces || []).filter((s) => s.error && (!gspace.project || s.project === gspace.project));
   for (const s of errs) note(box, "warn", `${s.project}: ${s.error}`);
   const e = el("div", "empty");
-  e.innerHTML = "<b>🗓</b>Nenhuma sprint ativa neste espaço.";
+  e.innerHTML = SC.data?.past ? "<b>🗓</b>A sprint escolhida não é deste espaço. Troque o Espaço ou volte para a Sprint atual."
+    : "<b>🗓</b>Nenhuma sprint ativa neste espaço.";
   box.appendChild(e);
 }
 
@@ -5454,6 +5457,43 @@ $("scSearch").addEventListener("input", () => {
 });
 document.querySelectorAll("#scPeriod button").forEach((b) => b.classList.toggle("on", b.dataset.p === SC.period));
 document.querySelectorAll("#scUnit button").forEach((b) => b.classList.toggle("on", b.dataset.unit === SC.unit));
+/* Sprint anterior: escolhe no seletor ao lado do Período; "Sprint atual" volta ao padrão. */
+function scPastSprint() {
+  if (!SC.data?.past) return null;
+  for (const sp of SC.data.spaces || []) for (const s of sp.closed || []) if (String(s.id) === String(SC.data.past)) return s;
+  return { name: "Sprint anterior" };
+}
+function paintSprintPick() {
+  const sel = $("scSprintPick");
+  if (!sel) return;
+  const spaces = (SC.data?.spaces || []).filter((sp) => !gspace.project || sp.project === gspace.project);
+  const many = spaces.filter((sp) => (sp.closed || []).length).length > 1;
+  const seen = new Set();
+  sel.innerHTML = "";
+  sel.append(new Option("Sprint atual", ""));
+  for (const sp of spaces) {
+    for (const s of sp.closed || []) {
+      if (seen.has(String(s.id))) continue;   // quadro compartilhado: a mesma sprint em dois espaços
+      seen.add(String(s.id));
+      const when = s.start ? ` · ${dayShort(s.start)} a ${dayShort(s.end || s.start)}` : "";
+      sel.append(new Option(`${many ? `${sp.label} · ` : ""}${s.name}${when}`, String(s.id)));
+    }
+  }
+  if (SC.sprintId && !seen.has(SC.sprintId)) sel.append(new Option(scPastSprint()?.name || "Sprint anterior", SC.sprintId));
+  sel.value = SC.sprintId;
+  sel.classList.toggle("on", !!SC.sprintId);
+  // numa sprint anterior, Hoje / 7 / 14 dias não fazem sentido: vale a sprint inteira
+  document.querySelectorAll("#scPeriod button").forEach((b) => {
+    b.disabled = !!SC.sprintId && b.dataset.p !== "sprint";
+    b.classList.toggle("on", SC.sprintId ? b.dataset.p === "sprint" : b.dataset.p === SC.period);
+  });
+}
+$("scSprintPick").addEventListener("change", (e) => {
+  SC.sprintId = e.target.value;
+  paintSprintPick();
+  loadScrum({ force: false });
+});
+
 $("scPeriod").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;

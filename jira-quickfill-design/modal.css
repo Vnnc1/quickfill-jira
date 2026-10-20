@@ -1475,3 +1475,9 @@ html.float .top-actions .ic { width: 28px; height: 28px; }
 .mtg-tline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .mtg-tgrp { width: 64px; flex: none; font-size: 11.5px; font-weight: 600; color: var(--faint); }
 .mtg-f[hidden] { display: none !important; }
+
+/* SCRUM: escolher uma sprint anterior, ao lado do Período */
+#scPeriodBar .sc-sprint-pick { flex: 0 1 auto; width: auto; max-width: 260px; cursor: pointer; }
+#scPeriodBar .sc-sprint-pick.on { border-color: var(--accent); background: var(--accent-soft); color: var(--txt); }
+#scPeriod button:disabled { opacity: .4; cursor: default; }
+#scPeriodBar { flex-wrap: wrap; }
