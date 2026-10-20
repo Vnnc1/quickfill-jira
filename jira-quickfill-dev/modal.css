@@ -1477,7 +1477,9 @@ html.float .top-actions .ic { width: 28px; height: 28px; }
 .mtg-f[hidden] { display: none !important; }
 
 /* SCRUM: escolher uma sprint anterior, ao lado do Período */
-#scPeriodBar .sc-sprint-pick { flex: 0 1 auto; width: auto; max-width: 260px; cursor: pointer; }
+#scPeriodBar .sc-sprint-pick { flex: 0 1 auto; width: auto; max-width: 260px; cursor: pointer; color-scheme: dark; }
+/* O menu nativo precisa de fundo opaco: o destaque .on usa transparência. */
+#scPeriodBar .sc-sprint-pick option { background: var(--surface); color: var(--txt); }
 #scPeriodBar .sc-sprint-pick.on { border-color: var(--accent); background: var(--accent-soft); color: var(--txt); }
 #scPeriod button:disabled { opacity: .4; cursor: default; }
 #scPeriodBar { flex-wrap: wrap; }

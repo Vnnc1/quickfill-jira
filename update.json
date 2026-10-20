@@ -1,5 +1,5 @@
 {
-  "version": "4.8.1",
+  "version": "4.8.2",
   "private": false,
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "installCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/quickfill.ps1 | iex\"",
@@ -8,22 +8,22 @@
   "notes": "SCRUM: ao lado do Período, escolha uma sprint anterior (até as 12 últimas) para ver Sprint, Pessoas e Riscos com as demandas dela. Sprint atual volta ao padrão.",
   "packages": {
     "qa": {
-      "version": "4.8.1",
+      "version": "4.8.2",
       "folder": "jira-quickfill-qa",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-qa.zip"
     },
     "dev": {
-      "version": "4.8.1",
+      "version": "4.8.2",
       "folder": "jira-quickfill-dev",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-dev.zip"
     },
     "scrum": {
-      "version": "4.8.1",
+      "version": "4.8.2",
       "folder": "jira-quickfill-scrum",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-scrum.zip"
     },
     "design": {
-      "version": "4.8.1",
+      "version": "4.8.2",
       "folder": "jira-quickfill-design",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-design.zip"
     }
