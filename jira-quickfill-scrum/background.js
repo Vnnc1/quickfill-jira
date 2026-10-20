@@ -42,6 +42,11 @@ const DEFAULTS = {
   scrumWipLimit: 2,                    // SCRUM: itens em andamento por pessoa antes de alertar
   designLabels: "design, ux, ui",      // DESIGN: etiquetas que marcam uma HU como "precisa de design"
   designWeeklyGoal: 3,                 // DESIGN: HUs entregues (handoff) por semana
+  uxProject: "UX",                     // DESIGN: chave do espaço da Design no Jira
+  uxHuProject: "",                     // DESIGN: projeto das HUs (vazio = projeto padrão)
+  uxWeeklyGoal: 8,                     // DESIGN: itens do UX feitos por semana
+  uxHiddenFronts: "Instagram",         // DESIGN: frentes (épicos) que não aparecem no filtro
+  uxIssueType: "HU",                   // DESIGN: tipo do item criado ao clonar uma HU para o UX
   // Etapas do quadro (vazio = padrão). Listas separadas por vírgula, sem acento/caixa.
   stageFeito: "",                      // ex.: "Feito, Dev OK"
   stageDeploy: "",                     // ex.: "Deploy, Deploy HMP"
@@ -2611,6 +2616,197 @@ async function designHus(p = {}) {
 }
 
 /* ------------------------------------------------------------------ */
+/* QuickFill DESIGN — espaço UX (quadro, entregas, demanda)             */
+/* ------------------------------------------------------------------ */
+
+const _ux = { at: 0, data: null, pending: null };
+const uxProjectOf = (cfg) => String(cfg.uxProject || splitList(cfg.designProjects)[0] || "UX").toUpperCase();
+const uxHuProjectOf = (cfg) => String(cfg.uxHuProject || cfg.defaultProject || "MEED").toUpperCase();
+
+async function searchPlain(jql, fields, max, cfg) {
+  const out = [];
+  let token = null;
+  do {
+    const page = await jira("/rest/api/3/search/jql", {
+      method: "POST", cfg, body: { jql, fields, maxResults: Math.min(100, max - out.length), ...(token ? { nextPageToken: token } : {}) },
+    });
+    out.push(...(page?.issues || []));
+    token = page?.nextPageToken || null;
+  } while (token && out.length < max);
+  return out;
+}
+
+const linkKeys = (links) => (links || []).map((l) => {
+  const other = l.outwardIssue || l.inwardIssue;
+  return other ? { key: other.key, type: l.outwardIssue ? l.type?.outward : l.type?.inward, status: other.fields?.status?.name || "" } : null;
+}).filter(Boolean);
+
+/**
+ * Espaço UX: itens do quadro (abertos + feitos nos últimos ~6 meses, com histórico de status),
+ * as HUs ligadas a eles e as HUs abertas do projeto do dev (para Demanda e "sem protótipo").
+ */
+async function uxBoardData(p = {}) {
+  if (!p.force && _ux.data && Date.now() - _ux.at < 90 * 1000) return _ux.data;
+  if (_ux.pending) return _ux.pending;
+  _ux.pending = (async () => {
+    const cfg = await getConfig();
+    const ux = uxProjectOf(cfg), huProject = uxHuProjectOf(cfg);
+    const me = await getMyself(cfg);
+    const uxFields = ["summary", "status", "issuetype", "assignee", "priority", "created", "updated", "parent", "issuelinks", "timespent", "labels", "duedate"];
+    const raw = await searchWithChangelog(`project = ${jqlString(ux)} AND (statusCategory != Done OR updated >= -190d) ORDER BY updated DESC`, uxFields, 600, cfg);
+    const items = raw.map((i) => {
+      const f = i.fields || {};
+      const tr = statusTransitions(i.changelog?.histories);
+      const isDone = f.status?.statusCategory?.key === "done";
+      const doneT = [...tr].reverse().find((t) => t.toName === f.status?.name) || [...tr].reverse().find((t) => /feito|conclu|done|entregue|finaliz/i.test(t.toName));
+      const waitT = [...tr].reverse().find((t) => /aguard/i.test(t.toName));
+      const startT = tr.find((t) => /andamento|progress|fazendo|doing/i.test(t.toName));
+      const parent = f.parent;
+      return {
+        key: i.key, summary: f.summary || "", type: f.issuetype?.name || "",
+        status: { name: f.status?.name || "", cat: f.status?.statusCategory?.key || "" },
+        assignee: f.assignee ? { id: f.assignee.accountId, name: f.assignee.displayName } : null,
+        mine: f.assignee?.accountId === me.accountId,
+        priority: f.priority?.name || "",
+        created: Date.parse(f.created) || null,
+        statusAt: tr.length ? tr[tr.length - 1].at : Date.parse(f.created) || null,
+        startedAt: startT?.at || null,
+        doneAt: isDone ? (doneT?.at || Date.parse(f.updated) || null) : null,
+        doneBy: isDone ? (doneT?.by || null) : null,
+        waitBy: waitT && /aguard/i.test(f.status?.name || "") ? { id: waitT.by, name: waitT.byName } : null,
+        front: parent?.fields?.summary || "",
+        spent: Math.round((f.timespent || 0) / 60),
+        due: f.duedate || null,
+        links: linkKeys(f.issuelinks).filter((l) => !l.key.startsWith(`${ux}-`)),
+      };
+    });
+
+    // HUs ligadas aos itens do UX (status atual)
+    const linkedKeys = [...new Set(items.flatMap((i) => i.links.map((l) => l.key)))];
+    const linked = [];
+    for (let k = 0; k < linkedKeys.length; k += 100) {
+      const chunk = linkedKeys.slice(k, k + 100);
+      const page = await searchPlain(`key in (${chunk.join(",")})`, ["summary", "status", "project", "issuetype", "resolutiondate"], 100, cfg).catch(() => []);
+      for (const h of page) linked.push({
+        key: h.key, summary: h.fields?.summary || "", project: h.fields?.project?.key || "",
+        status: { name: h.fields?.status?.name || "", cat: h.fields?.status?.statusCategory?.key || "" },
+        resolvedAt: Date.parse(h.fields?.resolutiondate) || null,
+      });
+    }
+
+    // HUs abertas do projeto do dev (Demanda e "no dev sem protótipo")
+    const husRaw = await searchPlain(
+      `project = ${jqlString(huProject)} AND statusCategory != Done AND issuetype not in subTaskIssueTypes() ORDER BY created ASC`,
+      ["summary", "status", "issuetype", "labels", "components", "created", "issuelinks"], 800, cfg).catch(() => []);
+    const hus = husRaw.filter((h) => !/bug|defeito/i.test(h.fields?.issuetype?.name || "")).map((h) => {
+      const links = linkKeys(h.fields?.issuelinks);
+      return {
+        key: h.key, summary: h.fields?.summary || "", type: h.fields?.issuetype?.name || "",
+        status: { name: h.fields?.status?.name || "", cat: h.fields?.status?.statusCategory?.key || "" },
+        labels: h.fields?.labels || [], components: (h.fields?.components || []).map((c) => c.name),
+        created: Date.parse(h.fields?.created) || null,
+        uxLinked: links.some((l) => l.key.startsWith(`${ux}-`)) || items.some((i) => i.links.some((l) => l.key === h.key)),
+      };
+    });
+
+    return {
+      generatedAt: Date.now(), now: Date.now(), today: todayLocal(), url: cfg.baseUrl,
+      me: { accountId: me.accountId, name: me.displayName },
+      ux, huProject, items, linked, hus,
+      goal: Math.max(1, Number(cfg.uxWeeklyGoal) || 8),
+      hiddenFronts: splitList(cfg.uxHiddenFronts),
+      truncated: raw.length >= 600,
+    };
+  })();
+  try {
+    const data = await _ux.pending;
+    _ux.at = Date.now();
+    _ux.data = data;
+    return data;
+  } finally { _ux.pending = null; }
+}
+
+/** Primeira transição para a categoria pedida (doing evita "Aguardando…"). */
+async function transitionTo(key, want, cfg) {
+  const page = await jira(`/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, { cfg });
+  const list = page?.transitions || [];
+  const pick = want === "done"
+    ? list.find((t) => t.to?.statusCategory?.key === "done" && /feito|conclu|done/i.test(t.to?.name || "")) || list.find((t) => t.to?.statusCategory?.key === "done")
+    : list.find((t) => t.to?.statusCategory?.key === "indeterminate" && !/aguard|aprova/i.test(t.to?.name || ""));
+  if (!pick) throw new Error(`${key}: nenhuma transição para ${want === "done" ? "Feito" : "Em andamento"}.`);
+  await jira(`/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, { method: "POST", cfg, body: { transition: { id: pick.id } } });
+  return pick.to?.name || pick.name;
+}
+
+/** Vínculo "a <tipo> b" (ex.: UX-430 clona MEED-482). */
+async function linkIssues(a, b, cfg, prefer = /relat|relacion/i) {
+  const page = await jira("/rest/api/3/issueLinkType", { cfg });
+  const types = page?.issueLinkTypes || [];
+  const t = types.find((x) => prefer.test(`${x.name} ${x.inward} ${x.outward}`))
+    || types.find((x) => /relat|relacion/i.test(`${x.name} ${x.inward} ${x.outward}`)) || types[0];
+  if (!t) throw new Error("Não há tipo de vínculo no Jira.");
+  await jira("/rest/api/3/issueLink", { method: "POST", cfg, body: { type: { name: t.name }, outwardIssue: { key: b }, inwardIssue: { key: a } } });
+  return t;
+}
+
+/** Ações do espaço UX: assumir, mover para Feito, cobrar, ligar a uma HU e clonar HU para o UX. */
+async function uxAction(p = {}) {
+  const cfg = await getConfig();
+  const ux = uxProjectOf(cfg);
+  _ux.at = 0;
+  if (p.op === "take") {
+    const me = await getMyself(cfg);
+    const key = normalizeKey(p.key);
+    await jira(`/rest/api/3/issue/${encodeURIComponent(key)}/assignee`, { method: "PUT", cfg, body: { accountId: me.accountId } });
+    const to = await transitionTo(key, "doing", cfg);
+    return { key, message: `${key} atribuída a você e movida para ${to}.` };
+  }
+  if (p.op === "done") {
+    const key = normalizeKey(p.key);
+    const to = await transitionTo(key, "done", cfg);
+    return { key, message: `${key} movida para ${to}.` };
+  }
+  if (p.op === "ask") {
+    const key = normalizeKey(p.key);
+    const text = String(p.text || "Ainda aguardando as informações para seguir. Pode me passar?");
+    const content = p.mention?.id
+      ? [{ type: "mention", attrs: { id: p.mention.id, text: `@${p.mention.name || ""}` } }, adfText(` ${text}`)]
+      : [adfText(text)];
+    await jira(`/rest/api/3/issue/${encodeURIComponent(key)}/comment`, { method: "POST", cfg, body: { body: adfDoc({ type: "paragraph", content }) } });
+    return { key, message: `Comentário em ${key}${p.mention?.name ? ` para ${p.mention.name}` : ""}.` };
+  }
+  if (p.op === "link") {
+    const a = normalizeKey(p.ux), b = normalizeKey(p.hu);
+    const t = await linkIssues(a, b, cfg);
+    return { key: a, message: `${a} ligado a ${b} (${t.outward || t.name}). Agora aparece em Entregas.` };
+  }
+  if (p.op === "clone") {
+    const hu = normalizeKey(p.hu);
+    const src = await jira(`/rest/api/3/issue/${encodeURIComponent(hu)}?fields=summary,priority`, { cfg });
+    const type = await issueTypeByName(ux, cfg.uxIssueType || "HU", cfg);
+    if (!type) throw new Error(`Não encontrei um tipo de issue para criar em ${ux}.`);
+    const fields = {
+      project: { key: ux }, issuetype: { id: type.id },
+      summary: `HU: ${src.fields?.summary || hu}`.slice(0, 250),
+      description: adfDoc(adfPara("Protótipo da HU ", adfLink(hu, `${cfg.baseUrl}/browse/${hu}`), "."),
+        adfPara(adfText("Criado pelo QuickFill DESIGN (aba Demanda).", [{ type: "em" }]))),
+      ...(src.fields?.priority?.id ? { priority: { id: src.fields.priority.id } } : {}),
+    };
+    let created;
+    try { created = await jira("/rest/api/3/issue", { method: "POST", cfg, body: { fields } }); }
+    catch (e) {
+      if (!/priority/i.test(e.message)) throw e;
+      delete fields.priority;
+      created = await jira("/rest/api/3/issue", { method: "POST", cfg, body: { fields } });
+    }
+    let linkNote = "";
+    try { await linkIssues(created.key, hu, cfg, /clon/i); } catch (e) { linkNote = ` (vínculo falhou: ${e.message})`; }
+    return { key: created.key, url: `${cfg.baseUrl}/browse/${created.key}`, message: `${hu} clonada para o UX como ${created.key}, em Itens pendentes, ligada à HU${linkNote}.` };
+  }
+  throw new Error("Ação desconhecida.");
+}
+
+/* ------------------------------------------------------------------ */
 /* Documento ADF (comentários e descrições)                             */
 /* ------------------------------------------------------------------ */
 
@@ -3092,6 +3288,8 @@ const HANDLERS = {
   SPRINT_KEYS: (p) => sprintKeys(p),
   SCRUM_SPRINT: (p) => scrumSprint(p),
   DESIGN_HUS: (p) => designHus(p),
+  UX_BOARD: (p) => uxBoardData(p),
+  UX_ACTION: (p) => uxAction(p),
   ASSIGNABLE_USERS: (p) => assignableUsers(p),
   ASSIGN_ISSUE: (p) => assignIssue(p),
   SAVE_SCRUM_SETTINGS: (p) => saveScrumSettings(p),

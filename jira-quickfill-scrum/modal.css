@@ -1491,3 +1491,51 @@ html.float .top-actions .ic { width: 28px; height: 28px; }
 .float-mini.loading #fmRing { stroke-dashoffset: 70 !important; }
 .float-mini.loading .fm-badge, .float-mini.loading .fm-txt { animation: fmPulse 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .float-mini.loading .ring, .float-mini.loading .fm-badge, .float-mini.loading .fm-txt { animation: none; } }
+
+/* ===== DESIGN · espaço UX (Quadro, Entregas, Demanda, Hoje, Progresso) ===== */
+.ux-box { display: flex; flex-direction: column; gap: 10px; }
+.ux-box:empty { display: none; }
+.ux-box > .m-tools { margin: 0; }
+.ux-segline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ux-segline .seg { margin-left: 0; flex-wrap: wrap; }
+.ux-lbl { font-size: 12px; font-weight: 600; color: var(--muted); min-width: 52px; }
+.ux-tiles { display: grid; gap: 6px; }
+.ux-tile { border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 9px 10px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ux-tile b { font-size: 20px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ux-tile span { font-size: 11px; color: var(--muted); line-height: 1.25; }
+.ux-card { gap: 8px; }
+.ux-card.bad { border-color: color-mix(in srgb, var(--err) 40%, transparent); }
+.ux-card.warn { border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.ux-card-t { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.ux-card-t > span { margin-left: auto; font-size: 12px; color: var(--muted); }
+.ux-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); min-width: 0; }
+.ux-row.dim { opacity: .5; }
+.ux-body { flex: 1; min-width: 0; }
+.ux-line { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.ux-k { font-family: var(--mono); font-size: 11.5px; color: var(--data); font-weight: 650; flex: none; }
+.ux-k.ux { color: var(--accent); }
+.ux-ttl { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ux-sub { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ux-arrow { color: var(--faint); font-size: 12px; flex: none; }
+.ux-chip { --c: var(--muted); display: inline-flex; align-items: center; font-size: 11px; font-weight: 650; border-radius: 999px; padding: 1px 8px; white-space: nowrap; flex: none; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+.ux-chip.ok { --c: var(--ok); }
+.ux-age { font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; flex: none; }
+.ux-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.ux-colh { display: flex; align-items: center; gap: 8px; padding: 2px 0; border: 0; background: transparent; width: 100%; cursor: pointer; text-align: left; color: inherit; font: inherit; }
+.ux-colh b { font-size: 12.5px; }
+.ux-colh span { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ux-bars { display: grid; gap: 6px; align-items: end; height: 110px; }
+.ux-bar { display: flex; flex-direction: column; align-items: center; gap: 3px; justify-content: flex-end; height: 100%; }
+.ux-bar i { width: 100%; min-height: 2px; border-radius: 5px 5px 2px 2px; background: var(--accent); opacity: .5; }
+.ux-bar.meet i { opacity: 1; }
+.ux-bar b { font-size: 11px; font-variant-numeric: tabular-nums; }
+.ux-bar span { font-size: 10px; color: var(--faint); white-space: nowrap; }
+.ux-bar.cur span { color: var(--txt); font-weight: 650; }
+.ux-stack { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 1px; background: var(--surface-2); }
+.ux-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--muted); }
+.ux-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.ux-legend b { color: var(--txt); font-variant-numeric: tabular-nums; }
+#uxTodayBox:not(:empty), #uxProgBox:not(:empty) { margin-bottom: 10px; }
+@container (max-width: 420px) { .ux-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+.ux-search { display: flex; }
+.ux-search input { width: 100%; box-sizing: border-box; }

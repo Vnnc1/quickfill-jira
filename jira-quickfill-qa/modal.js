@@ -1,6 +1,7 @@
 import { parseDuration, humanize } from "./lib/duration.js";
 import { saveDraft, flushDraft, loadDraft, clearDraft, since } from "./lib/draft.js";
 import { ROLE, INSTALL_CMD } from "./lib/role.js";
+import { initUx, loadUx, uxData, uxViewState, uxApplyViewState, renderUxBoard, renderUxDeliveries, renderUxDemand, renderUxToday, renderUxProgress } from "./design-ux.js";
 import { loadAccent } from "./lib/theme.js";
 import { initFloat, popOutFromPanel } from "./lib/float.js";
 import { openHistory, ICON_HIST } from "./lib/history-view.js";
@@ -43,7 +44,15 @@ const CREATE_IDS = ["newSubtaskName", "assignSelfSingle", "skipDupSingle",
 const SPACES = ["batch", "sustentacao"];
 const isSpace = (m) => m === "lote";
 const SPACE_LABEL = { batch: "MEED", sustentacao: "SUS" };
-const VIEW_TABS = ["day", "panel", "team", "today", "progress", "demands", "sprint", "people", "risks", "hus", "qaq"];   // abas de consulta (sem formulário)
+const VIEW_TABS = ["day", "panel", "team", "today", "progress", "demands", "sprint", "people", "risks", "hus", "qaq", "uxboard", "uxdeliv", "uxdemand"];
+const UX_TABS = { uxboard: ["uxBoardBox", renderUxBoard], uxdeliv: ["uxDelivBox", renderUxDeliveries], uxdemand: ["uxDemandBox", renderUxDemand] };
+/** Redesenha o que do espaço UX está na tela (aba do UX, ou as partes do Hoje e do Progresso). */
+function rerenderUx() {
+  const tab = UX_TABS[state.mode];
+  if (tab) tab[1]($(tab[0]));
+  if (ROLE === "design" && state.mode === "today") renderUxToday($("uxTodayBox"));
+  if (ROLE === "design" && state.mode === "progress") renderUxProgress($("uxProgBox"));
+}   // abas de consulta (sem formulário)
 
 /* Padrões (sobrescritos pelo GET_DEFAULTS no boot) */
 let DEF = {
@@ -265,7 +274,8 @@ function setMode(mode, { restoring = false } = {}) {
   document.querySelector('[data-pane="day"]').classList.toggle("hidden", mode !== "day");
   document.querySelector('[data-pane="panel"]').classList.toggle("hidden", mode !== "panel");
   document.querySelector('[data-pane="team"]').classList.toggle("hidden", mode !== "team");
-  for (const v of ["today", "progress", "demands", "sprint", "people", "risks", "hus", "qaq"]) document.querySelector(`[data-pane="${v}"]`).classList.toggle("hidden", mode !== v);
+  for (const v of ["today", "progress", "demands", "sprint", "people", "risks", "hus", "qaq", "uxboard", "uxdeliv", "uxdemand"]) document.querySelector(`[data-pane="${v}"]`).classList.toggle("hidden", mode !== v);
+  if (ROLE === "design") $("spaceBar").classList.toggle("hidden", !!UX_TABS[mode]);   // o espaço UX tem a própria Frente
   if (mode === "today") startTodayPolling(); else stopTodayPolling();
   $("result").classList.add("hidden");
   toast(null);
@@ -278,6 +288,10 @@ function setMode(mode, { restoring = false } = {}) {
     showForm(false);
     if (QQ.data) renderQaQueue();
     if (!QQ.data || Date.now() - QQ.data.generatedAt > 60 * 1000) loadQaQueue();
+  } else if (UX_TABS[mode]) {
+    showForm(false);
+    if (uxData()) rerenderUx();
+    loadUx({ render: rerenderUx }).catch(() => {});
   } else if (mode === "hus") {
     showForm(false);
     if (DS.data) renderHus();
@@ -286,6 +300,7 @@ function setMode(mode, { restoring = false } = {}) {
     showForm(false);
     if (mode === "today") loadToday();
     if (mode === "progress") loadProgress();
+    if (ROLE === "design" && mode !== "demands") { rerenderUx(); loadUx({ render: rerenderUx }).catch(() => {}); }
     if (mode === "demands") loadDemands();
   } else if (mode === "day") {
     showForm(false);
@@ -5888,7 +5903,7 @@ function viewSnapshot() {
   const v = { savedAt: Date.now(), mode: state.mode, scroll: $("scroll").scrollTop, teamDate: team.date };
   if (ROLE === "scrum") v.sc = { search: SC.search || "", q: SC.q || "", stageSel: SC.stageSel || null, pOpen: [...SC.pOpen],
     pStage: [...SC.pStage], treeAll: SC.treeAll, deploy: SC.deployDraft || null };
-  if (ROLE === "design") v.ds = { open: [...DS.open], drafts: DS.drafts };
+  if (ROLE === "design") { v.ds = { open: [...DS.open], drafts: DS.drafts }; v.ux = uxViewState(); }
   if (HAS_PROG) v.dv = { date: DV.date };
   if (ROLE === "qa") v.qa = { qqWho: QQ.who, dayDate: state.dayDate, evOpen: !$("evidenceBody").classList.contains("hidden"),
     evResult: EV.result, ev: Object.fromEntries(EV_IDS.map((id) => [id, $(id).value])) };
@@ -5927,6 +5942,7 @@ function applyViewState(v) {
     SC.deployDraft = v.sc.deploy || null;
   }
   if (v.ds) { DS.open = new Set(v.ds.open || []); DS.drafts = v.ds.drafts || {}; }
+  if (v.ux) uxApplyViewState(v.ux);
   if (v.dv?.date) DV.date = v.dv.date;
   if (v.teamDate) team.date = v.teamDate;
   if (v.qa) {
@@ -6256,9 +6272,9 @@ chrome.runtime.onMessage.addListener((msg) => {
       : [defaults?.spaces?.batch?.label || "MEED", defaults?.spaces?.sustentacao?.label || "SUS"];
     if (!projects.includes(gspace.project)) gspace.project = "";
     renderGlobalSpace([...new Set(projects)]);
-    if (ROLE === "design" && !defaults?.designProjects?.length) toast("Configure o projeto do espaço de Design nas Opções — por enquanto aparecem MEED e SUS.", "info");
-    const TABS = { dev: ["today", "progress", "demands", "team"], scrum: ["sprint", "people", "risks", "team"], design: ["today", "hus", "progress", "team"] }[ROLE];
-    $("ctxLine").textContent = { dev: "Seu dia, seu progresso e sua equipe", scrum: "Sprint, pessoas, riscos e equipe", design: "Seu dia, suas HUs e suas metas" }[ROLE] || "";
+    if (ROLE === "design") await initUx({ send, toast, jiraLink, rerender: rerenderUx });
+    const TABS = { dev: ["today", "progress", "demands", "team"], scrum: ["sprint", "people", "risks", "team"], design: ["today", "uxboard", "uxdeliv", "uxdemand", "progress", "team"] }[ROLE];
+    $("ctxLine").textContent = { dev: "Seu dia, seu progresso e sua equipe", scrum: "Sprint, pessoas, riscos e equipe", design: "Espaço UX: seu dia, quadro, entregas e demanda" }[ROLE] || "";
     if (HAS_PROG) await warmProg();
     const want = params.get("tab");
     const view = await resumeView();

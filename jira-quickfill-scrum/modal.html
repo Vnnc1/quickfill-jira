@@ -94,7 +94,10 @@
       <button class="tab" data-roles="scrum" data-mode="sprint">Sprint</button>
       <button class="tab" data-roles="scrum" data-mode="people">Pessoas</button>
       <button class="tab" data-roles="scrum" data-mode="risks">Riscos</button>
-      <button class="tab" data-roles="design" data-mode="hus">HUs</button>
+      <button class="tab" data-roles="design-old" data-mode="hus">HUs</button>
+      <button class="tab" data-roles="design" data-mode="uxboard">Quadro</button>
+      <button class="tab" data-roles="design" data-mode="uxdeliv">Entregas</button>
+      <button class="tab" data-roles="design" data-mode="uxdemand">Demanda</button>
       <button class="tab dash-only" data-roles="dev design" data-mode="progress">Progresso</button>
       <button class="tab dash-only" data-roles="dev" data-mode="demands">Demandas</button>
       <button class="tab full-only" data-mode="panel">Painel</button>
@@ -141,6 +144,7 @@
 
       <!-- ============ Hoje (DEV) ============ -->
       <section class="pane hidden" data-pane="today">
+        <div id="uxTodayBox" class="ux-box" data-roles="design"></div>
         <div class="daynav">
           <button class="ic bordered" id="tdPrev" title="Dia anterior">‹</button>
           <input type="date" id="tdDate" class="inp" />
@@ -168,6 +172,7 @@
           <select id="pgSprint" class="inp sm" title="Sprint"></select>
         </div>
         <p class="muted xs" id="pgSprintErr"></p>
+        <div id="uxProgBox" class="ux-box" data-roles="design"></div>
         <div id="progressBox"><p class="muted xs">Carregando…</p></div>
       </section>
 
@@ -227,6 +232,11 @@
         </div>
         <div id="risksBox" class="m-box"><p class="muted xs">Carregando…</p></div>
       </section>
+
+      <!-- ============ Espaço UX (DESIGN): Quadro, Entregas, Demanda ============ -->
+      <section class="pane hidden" data-pane="uxboard"><div id="uxBoardBox" class="ux-box"><p class="muted xs">Carregando o quadro do UX…</p></div></section>
+      <section class="pane hidden" data-pane="uxdeliv"><div id="uxDelivBox" class="ux-box"><p class="muted xs">Carregando as entregas…</p></div></section>
+      <section class="pane hidden" data-pane="uxdemand"><div id="uxDemandBox" class="ux-box"><p class="muted xs">Carregando as HUs…</p></div></section>
 
       <!-- ============ HUs (DESIGN) ============ -->
       <section class="pane hidden" data-pane="hus">

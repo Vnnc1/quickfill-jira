@@ -72,12 +72,14 @@ const FIELDS = ["baseUrl", "email", "apiToken", "startDateFieldId", "logWorkComm
   "scrumStaleDays", "scrumWipLimit", "designLabels", "designWeeklyGoal",
   "stageFeito", "stageDeploy", "stagePrd", "stageQa", "stageReopen", "designDoing", "designReview", "designDelivered",
   "feitoThreshold", "deployIssueType", "deploySummary", "deployers", "figmaUrl", "figmaToken", "qaRejectCategories",
-  "stageValidated", "stageBlocked", "qaPeople", "designProjects", "smPeople", "ignorePeople", "designPeople", "accentColor", "openMode", "updateUrl", "updateToken"];
+  "stageValidated", "stageBlocked", "qaPeople", "designProjects", "smPeople", "ignorePeople", "designPeople", "accentColor", "openMode", "updateUrl", "updateToken",
+  "uxProject", "uxHuProject", "uxWeeklyGoal", "uxHiddenFronts", "uxIssueType"];
 // Todas nascem ligadas: só ficam desligadas se tiverem sido salvas como false.
 const FLAGS = ["assignSelf", "skipWeekends", "estimateFromSpent", "zeroRemainingOnDone"];
 const DEFAULT_VALUES = { workStart: "11:00", workEnd: "17:00", dailyCapHours: "6", dailyGoalHours: "4", defaultStoryPoints: "1",
   teamGoalHours: "4", teamCapHours: "6", overflowMode: "sameDay",
   scrumStaleDays: "3", scrumWipLimit: "2", designLabels: "design, ux, ui", designWeeklyGoal: "3",
+  uxProject: "UX", uxWeeklyGoal: "8", uxHiddenFronts: "Instagram", uxIssueType: "HU",
   feitoThreshold: "3", deployIssueType: "Tarefa", deploySummary: "Realizando Deploy", deployers: "[]",
   qaPeople: '[{"name":"Almir Vinicius"},{"name":"Jhonathan Pinheiro"}]',
   openMode: "panel", accentColor: "", updateUrl: "",
@@ -197,6 +199,9 @@ $("save").addEventListener("click", () => {
   data.ignorePeople = data.ignorePeople || "[]";
   data.designPeople = data.designPeople || "[]";
   data.designProjects = data.designProjects.toUpperCase();
+  data.uxProject = (data.uxProject || "UX").trim().toUpperCase();
+  data.uxHuProject = (data.uxHuProject || "").trim().toUpperCase();
+  data.uxWeeklyGoal = String(Math.min(50, Math.max(1, Math.round(Number(data.uxWeeklyGoal) || 8))));
   if (data.figmaUrl && !/figma\.com\/(file|design|proto|board)\//.test(data.figmaUrl)) return msg("O link do Figma precisa ser de um arquivo (figma.com/design/…).", true);
   data.teamProjects = data.teamProjects.toUpperCase();
   data.defaultProject = data.defaultProject.toUpperCase();

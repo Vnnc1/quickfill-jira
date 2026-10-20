@@ -208,6 +208,18 @@
 
     <!-- DESIGN -->
     <section class="card" data-roles="design">
+      <h2>Espaço UX (DESIGN)</h2>
+      <div class="grid2">
+        <label class="field"><span>Chave do espaço da Design</span><input id="uxProject" class="inp mono" placeholder="UX" /></label>
+        <label class="field"><span>Projeto das HUs (Entregas e Demanda)</span><input id="uxHuProject" class="inp mono" placeholder="vazio = projeto padrão (MEED)" /></label>
+        <label class="field"><span>Meta de itens feitos por semana</span><input id="uxWeeklyGoal" class="inp mono" type="number" min="1" max="50" step="1" placeholder="8" /></label>
+        <label class="field"><span>Frentes que não aparecem no filtro</span><input id="uxHiddenFronts" class="inp" placeholder="Instagram" /></label>
+        <label class="field"><span>Tipo do item ao clonar uma HU</span><input id="uxIssueType" class="inp" placeholder="HU" /></label>
+      </div>
+      <p class="help">Quadro, Entregas e Demanda leem o espaço UX. As frentes são os épicos dos itens; separe várias por vírgula. "Sem tela" (aba Demanda) fica salvo neste navegador.</p>
+    </section>
+
+    <section class="card" data-roles="design-old">
       <h2>HUs de design (DESIGN)</h2>
       <div class="grid2">
         <label class="field"><span>Projeto(s) do espaço de Design</span><input id="designProjects" class="inp mono" placeholder="ex.: DES" /></label>
