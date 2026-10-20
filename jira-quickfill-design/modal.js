@@ -3,6 +3,7 @@ import { saveDraft, flushDraft, loadDraft, clearDraft, since } from "./lib/draft
 import { ROLE, INSTALL_CMD } from "./lib/role.js";
 import { loadAccent } from "./lib/theme.js";
 import { initFloat, popOutFromPanel } from "./lib/float.js";
+import { openHistory, ICON_HIST } from "./lib/history-view.js";
 import { loadMeetings, onMeetingsChange, meetingMinutes, attachMeetings, meetingsCard, setMeetingApi } from "./lib/meetings.js";
 import { addDaysIso, isWeekendIso, DAY_MS } from "./lib/dates.js";
 import { totalOf, byIssue, streakAt, averageBefore, averageUntil, periodStats, weekCompare, countedDays, demandBoard, deployLabel, feitoLabel, DEMAND_GROUPS } from "./lib/devstats.js";
@@ -77,6 +78,26 @@ function jiraLink(key, { base, label = "Jira", title } = {}) {
   const go = (e) => { e.preventDefault(); e.stopPropagation(); openIssue(url, e); };
   el.addEventListener("click", go);
   el.addEventListener("auxclick", (e) => { if (e.button === 1) go(e); });
+  el.addEventListener("mousedown", (e) => e.stopPropagation());
+  el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") go(e); });
+  return el;
+}
+
+/**
+ * Botão "Histórico" que abre o caminho da demanda no quadro (etapas, voltas, quem mexeu).
+ * Mesmo esquema do jiraLink: <span role="button"> para poder ficar dentro de <button>/<label>.
+ */
+function histLink(key, { base, label = "Histórico" } = {}) {
+  const el = document.createElement("span");
+  el.className = "jl hl";
+  el.setAttribute("role", "button");
+  el.tabIndex = 0;
+  el.title = `Ver o caminho de ${key} no quadro`;
+  if (!label) el.setAttribute("aria-label", `Histórico de ${key}`);
+  el.innerHTML = ICON_HIST;
+  if (label) el.append(document.createTextNode(label));
+  const go = (e) => { e.preventDefault(); e.stopPropagation(); openHistory(key, { send, openIssue, base: base || DEF.baseUrl }); };
+  el.addEventListener("click", go);
   el.addEventListener("mousedown", (e) => e.stopPropagation());
   el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") go(e); });
   return el;
@@ -652,7 +673,7 @@ function renderSubtasks() {
       b.querySelector(".k").after(tag);
       b.title = "Aplicar horas, datas, pontos e status na própria tarefa pai";
     }
-    b.appendChild(jiraLink(s.key, { label: "" }));
+    b.append(histLink(s.key, { label: "" }), jiraLink(s.key, { label: "" }));
     b.addEventListener("click", () => selectSubtask(s.key));
     box.appendChild(b);
   }
@@ -988,7 +1009,7 @@ function renderBoardList() {
     row.querySelector(".k").textContent = i.key;
     row.querySelector(".s").textContent = i.summary;
     row.querySelector(".st").textContent = i.assignee || "sem responsável";
-    row.appendChild(jiraLink(i.key, { label: "" }));
+    row.append(histLink(i.key, { label: "" }), jiraLink(i.key, { label: "" }));
     box.appendChild(row);
   }
   updateBoardCount();
@@ -1079,7 +1100,7 @@ function renderBatchList() {
     row.querySelector(".s").textContent = t.summary;
     row.querySelector(".st").textContent = t.status;
     row.title = t.assigneeName ? `Responsável: ${t.assigneeName}` : "Sem responsável";
-    row.appendChild(jiraLink(t.key, { label: "" }));
+    row.append(histLink(t.key, { label: "" }), jiraLink(t.key, { label: "" }));
     box.appendChild(row);
   }
   updateBatchCount();
@@ -1865,7 +1886,10 @@ function dashRow(it, d) {
 
   const side = document.createElement("div");
   side.className = "dr-side";
-  side.appendChild(jiraLink(it.key, { base: d.url || DEF.baseUrl, label: "Jira" }));
+  const links = document.createElement("span");
+  links.className = "dr-links";
+  links.append(histLink(it.key, { base: d.url || DEF.baseUrl }), jiraLink(it.key, { base: d.url || DEF.baseUrl, label: "Jira" }));
+  side.appendChild(links);
   if (it.estimate || it.spent) {
     const bar = document.createElement("div");
     bar.className = "mini-bar";
@@ -3117,7 +3141,7 @@ function issueLine(issue, right, sub, base = DEF.baseUrl) {
   if (sub) main.appendChild(el("div", "m-row-sub", sub));
   r.append(main);
   if (right != null) r.appendChild(typeof right === "string" ? el("span", "m-row-r", right) : right);
-  r.appendChild(jiraLink(issue.key, { base, label: "" }));
+  r.append(histLink(issue.key, { base, label: "" }), jiraLink(issue.key, { base, label: "" }));
   return r;
 }
 
@@ -4695,7 +4719,7 @@ function taskRow(i, { meta = "", actions = [] } = {}) {
   const foot = el("div", "tr-foot");
   foot.append(el("span", "tr-meta", meta));
   const act = el("span", "tr-actions");
-  act.append(...actions, jiraLink(i.key, { base: SC.data?.url, label: "" }));
+  act.append(...actions, histLink(i.key, { base: SC.data?.url }), jiraLink(i.key, { base: SC.data?.url, label: "" }));
   foot.appendChild(act);
   r.appendChild(foot);
   return r;

@@ -2225,6 +2225,45 @@ const statusTransitions = (histories) => {
   return out.sort((a, b) => a.at - b.at);
 };
 
+/**
+ * Histórico da demanda (botão "Histórico" das listas): todas as mudanças de status com a etapa
+ * de cada uma no quadro do espaço, quem fez e os comentários (para explicar as voltas).
+ */
+async function issueHistory(p = {}) {
+  const cfg = await getConfig();
+  assertConfigured(cfg);
+  const key = normalizeKey(p.key);
+  const fields = "summary,issuetype,parent,created,creator,reporter,status,project";
+  const [issue, logs, meta, comments] = await Promise.all([
+    jira(`/rest/api/3/issue/${encodeURIComponent(key)}?fields=${fields}`, { cfg }),
+    fullChangelog(key, cfg),
+    statusMeta(cfg),
+    jira(`/rest/api/3/issue/${encodeURIComponent(key)}/comment?maxResults=100&orderBy=created`, { cfg }).catch(() => null),
+  ]);
+  const f = issue?.fields || {};
+  const project = f.project?.key || key.split("-")[0];
+  const spaces = await qaSpaces(cfg, meta).catch(() => []);
+  const kinds = spaces.find((s) => s.project === project)?.kinds || {};
+  const R = stageRules(cfg);
+  const kindOf = (id, name) => kinds[id]?.kind || (meta[id]?.cat === "done" ? "done" : columnKind(name || meta[id]?.name || "", R));
+  const stageOfId = (id, name) => stageFrom(kindOf(id, name), meta[id]?.cat);
+  const st = f.status || {};
+  const who = f.creator || f.reporter;
+  return {
+    key, url: `${cfg.baseUrl}/browse/${key}`,
+    summary: f.summary || "", type: f.issuetype?.name || "", parentKey: f.parent?.key || null,
+    created: Date.parse(f.created) || null,
+    creator: who ? { id: who.accountId || "", name: who.displayName || "" } : null,
+    status: { name: st.name || "", stage: stageOfId(String(st.id || ""), st.name) },
+    transitions: statusTransitions(logs).map((t) => ({ ...t,
+      fromKind: kindOf(t.from, t.fromName), toKind: kindOf(t.to, t.toName),
+      fromStage: stageOfId(t.from, t.fromName), toStage: stageOfId(t.to, t.toName) })),
+    comments: (comments?.comments || []).map((c) => ({
+      at: Date.parse(c.created), by: c.author?.accountId || "", byName: c.author?.displayName || "", text: adfExcerpt(c.body, 220),
+    })),
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* QuickFill DEV — minhas demandas                                     */
 /* ------------------------------------------------------------------ */
@@ -2905,6 +2944,7 @@ const HANDLERS = {
   SPRINT_INFO: (p) => sprintInfo(p),
   MY_PROGRESS: (p) => myProgress(p),
   MY_DEMANDS: (p) => myDemands(p),
+  ISSUE_HISTORY: (p) => issueHistory(p),
   SPRINT_KEYS: (p) => sprintKeys(p),
   SCRUM_SPRINT: (p) => scrumSprint(p),
   DESIGN_HUS: (p) => designHus(p),
