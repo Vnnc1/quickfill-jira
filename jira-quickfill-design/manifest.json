@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Jira QuickFill DESIGN — HUs e metas",
-  "version": "4.7.0",
+  "version": "4.8.0",
   "description": "DESIGN: suas HUs por etapa (fila, em design, revisão, com o dev), quem está aguardando design, meta semanal de entregas, seu dia e a equipe.",
   "permissions": [
     "storage",

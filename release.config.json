@@ -1,6 +1,6 @@
 {
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "branch": "master",
-  "notes": "Histórico da demanda: o botão Histórico nas listas mostra o caminho da demanda no quadro, com quem mexeu, quanto tempo ficou em cada etapa e cada vez que ela voltou (com o comentário do motivo). Visão horizontal ou vertical e filtro Só as voltas, nos 4 perfis.",
+  "notes": "Linha do tempo com Reuniões e Execução: no + há modelos do seu perfil (editáveis nas Opções) e, ao criar a demanda no Jira, o campo Categoria. Na Equipe, o filtro Reuniões | Execução mostra quem esteve em reunião, deploy, refinamento, configuração ou testes, com o histórico de cada pessoa; as demandas são reconhecidas pela Categoria ou pelo título, sem gravar nada no Jira. Histórico nas Opções mais claro, com o registro de alterações.",
   "private": false
 }
