@@ -1,6 +1,6 @@
 {
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "branch": "master",
-  "notes": "Reuniões na linha do tempo: arraste a bolinha + até o horário para marcar daily, alinhamento ou reunião; contam na meta do dia e alinhamentos/reuniões podem virar demanda no Jira. Histórico em Opções › Reuniões e alinhamentos. O QA abre em Meu dia. No SCRUM, Feito/PR e os riscos seguem o quadro (só cards) e o filtro de Espaço vale para os itens.",
+  "notes": "Histórico da demanda: o botão Histórico nas listas mostra o caminho da demanda no quadro, com quem mexeu, quanto tempo ficou em cada etapa e cada vez que ela voltou (com o comentário do motivo). Visão horizontal ou vertical e filtro Só as voltas, nos 4 perfis.",
   "private": false
 }
