@@ -4,7 +4,9 @@ import { ROLE, INSTALL_CMD } from "./lib/role.js";
 import { loadAccent } from "./lib/theme.js";
 import { initFloat, popOutFromPanel } from "./lib/float.js";
 import { openHistory, ICON_HIST } from "./lib/history-view.js";
-import { loadMeetings, onMeetingsChange, meetingMinutes, attachMeetings, meetingsCard, setMeetingApi } from "./lib/meetings.js";
+import { loadMeetings, onMeetingsChange, meetingMinutes, attachMeetings, meetingsCard, setMeetingApi,
+  meetingsOn, meetingsBetween, meetingLog, describeChange, ago, MEETING_TYPES, MEETING_GROUPS, groupOfType, rgba as mtgRgba } from "./lib/meetings.js";
+import { byLabel } from "./lib/meeting-detect.js";
 import { addDaysIso, isWeekendIso, DAY_MS } from "./lib/dates.js";
 import { totalOf, byIssue, streakAt, averageBefore, averageUntil, periodStats, weekCompare, countedDays, demandBoard, deployLabel, feitoLabel, DEMAND_GROUPS } from "./lib/devstats.js";
 import { STAGES, RISKS, DESIGN_STAGES, HANDOFF_ITEMS, TYPE_LABEL, stageOf, typeGroup, normName, sprintHealth, sprintTree, peopleLoad,
@@ -2070,13 +2072,16 @@ function renderTeam() {
   const re = Math.max(18 * 60, ...all.map((e) => Math.ceil(e.end / 60) * 60));
   const range = { start: Math.max(0, rs), end: Math.min(24 * 60, re) };
 
-  if (!people.length) {
+  const mtgView = MTG_ON && (team.view === "mtg" || team.view === "exec");
+  if (!people.length && !mtgView) {
     const e = document.createElement("div");
     e.className = "empty";
     e.innerHTML = d.people.length ? "<b>🔎</b>Ninguém com esse filtro." : "<b>👥</b>Ninguém apontou nos projetos acompanhados nos últimos dias.";
     box.appendChild(e);
   } else if (team.view === "lanes") {
     box.appendChild(teamLanes(people, range, d));
+  } else if (mtgView) {
+    for (const c of teamMeetingsView(people, range, d, team.view === "exec" ? "execucao" : "reunioes")) box.appendChild(c);
   } else {
     const grid = document.createElement("div");
     grid.className = "tgrid";
@@ -2168,14 +2173,23 @@ function teamHero(visible, k, total, avg, d) {
   }
   right.appendChild(chips);
 
+  // Cartões e Linha do tempo de um lado; Reuniões e Execução num filtro à parte
   const views = document.createElement("div");
-  views.className = "seg t-views";
-  for (const [id, label] of [["cards", "Cartões"], ["lanes", "Linha do tempo"]]) {
-    const b = document.createElement("button");
-    b.textContent = label;
-    b.classList.toggle("on", (team.view || "cards") === id);
-    b.addEventListener("click", () => { team.view = id; try { localStorage.setItem("qf.teamView", id); } catch { /* ok */ } renderTeam(); });
-    views.appendChild(b);
+  views.className = "t-views";
+  const groups = [[["cards", "Cartões"], ["lanes", "Linha do tempo"]]];
+  if (MTG_ON) groups.push([["mtg", MEETING_GROUPS.reunioes.label], ["exec", MEETING_GROUPS.execucao.label]]);
+  for (const g of groups) {
+    const seg = document.createElement("div");
+    seg.className = "seg";
+    for (const [id, label] of g) {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.classList.toggle("on", (team.view || "cards") === id);
+      b.setAttribute("aria-pressed", String((team.view || "cards") === id));
+      b.addEventListener("click", () => { team.view = id; try { localStorage.setItem("qf.teamView", id); } catch { /* ok */ } renderTeam(); });
+      seg.appendChild(b);
+    }
+    views.appendChild(seg);
   }
   hero.append(left, right, views);
   return hero;
@@ -2243,6 +2257,326 @@ function teamLanes(people, range, d) {
     wrap.appendChild(row);
   }
   return wrap;
+}
+
+/**
+ * Visão Reuniões: na régua da equipe, as reuniões de cada pessoa. Vêm de dois lugares:
+ *  - as que você marcou no + (ficam só neste navegador);
+ *  - apontamentos em demandas do Jira que foram reuniões (Planning, Review, alinhamentos…),
+ *    reconhecidas pelo título ou, sem pista no título, pela descrição. Só leitura.
+ */
+const MTG_KEY_RX = /^[A-Z][A-Z0-9_]*-\d+$/;
+function teamMeetingsView(people, range, d, group = "reunioes") {
+  const G = MEETING_GROUPS[group];
+  const inGroup = (m) => G.types.includes(m.type);
+  const word = group === "execucao" ? "execução" : "reuniões";
+  const date = d.date || todayISO();
+  const now = nowMin();
+  const live = date === todayISO();
+  const type = (team.mtgTypes || (team.mtgTypes = {}))[group] || "all";
+  const cls = team.mtgClass || (team.mtgClass = new Map());   // chave -> { type, by, match } | null
+
+  // demandas ainda não classificadas: pergunta ao serviço uma vez e redesenha
+  const keys = [...new Set(people.flatMap((p) => p.entries.map((e) => e.key)))].filter((k) => MTG_KEY_RX.test(k) && !cls.has(k));
+  if (keys.length && !team.mtgPending) {
+    team.mtgPending = true;
+    send("MEETING_CLASSIFY", { keys })
+      .then((res) => { for (const k of keys) cls.set(k, res[k] || null); })
+      .catch(() => { for (const k of keys) cls.set(k, null); })
+      .finally(() => { team.mtgPending = false; if (state.mode === "team" && (team.view === "mtg" || team.view === "exec")) renderTeam(); });
+  }
+
+  const fromJira = (p) => p.entries.filter((e) => cls.get(e.key)).map((e) => ({
+    type: cls.get(e.key).type, by: cls.get(e.key).by, title: e.summary || e.key, start: e.start, end: e.end, jiraKey: e.key, fromJira: true,
+  }));
+  const rows = people.map((p) => {
+    const jira = fromJira(p);
+    const local = p.isMe ? meetingsOn(date) : [];
+    const linked = new Set(local.map((m) => m.jiraKey).filter(Boolean));
+    return { id: p.accountId, name: p.name, isMe: p.isMe, local, jira: jira.filter((m) => !linked.has(m.jiraKey)) };
+  });
+  const pick = (m) => inGroup(m) && (type === "all" || m.type === type);
+  rows.forEach((r) => { r.all = [...r.local, ...r.jira].filter(inGroup); r.list = r.all.filter(pick); });
+  const allM = rows.flatMap((r) => r.list);
+  const lo = Math.max(0, Math.min(range.start, ...allM.map((m) => Math.floor(m.start / 60) * 60)));
+  const hi = Math.min(24 * 60, Math.max(range.end, ...allM.map((m) => Math.ceil(m.end / 60) * 60)));
+  const span = hi - lo;
+  const pos = (m) => `${((m - lo) / span) * 100}%`;
+  const short = (r) => (r.isMe ? "Você" : r.name.split(" ").slice(0, 2).join(" "));
+  const avatar = (r) => {
+    const a = document.createElement("span");
+    a.className = "t-av sm";
+    a.style.background = avatarColor(r.id);
+    a.textContent = initials(r.name);
+    return a;
+  };
+  const block = (tr, m, who) => {
+    const t = MEETING_TYPES[m.type] || MEETING_TYPES.outro;
+    const b = document.createElement("span");
+    b.className = "blk mt-blk" + (m.fromJira ? " jira" : "");
+    b.style.left = pos(Math.max(lo, m.start));
+    b.style.width = `${(Math.min(m.end, hi) - Math.max(lo, m.start)) / span * 100}%`;
+    b.style.borderColor = t.color;
+    b.style.background = mtgRgba(t.color, 0.24);
+    b.dataset.tip = `${who}\n${t.label}: ${m.title}\n${fmtHM(m.start)}–${fmtHM(m.end)} · ${fmtDur(m.end - m.start)}${m.jiraKey ? ` · ${m.jiraKey}` : ""}`
+      + (m.fromJira ? `\nReconhecida ${byLabel(m.by)} da demanda${m.category ? ` (Categoria: ${m.category})` : ""}` : "");
+    tr.appendChild(b);
+  };
+
+  /* --- régua --- */
+  const wrap = document.createElement("div");
+  wrap.className = "card t-lanes mt-lanes";
+  const busyNow = live ? rows.filter((r) => r.all.some((m) => m.start <= now && m.end > now)).length : 0;
+  const total = allM.reduce((s, m) => s + m.end - m.start, 0);
+  const head = document.createElement("div");
+  head.className = "card-t";
+  head.innerHTML = "<b></b><span></span>";
+  head.querySelector("b").textContent = group === "execucao" ? "Execução da equipe" : "Reuniões da equipe";
+  head.querySelector("span").textContent = [busyNow ? `${busyNow} ${group === "execucao" ? "em execução" : "em reunião"} agora` : "", allM.length ? `${fmtDur(total)} no dia` : "",
+    team.mtgPending ? "lendo as demandas…" : ""].filter(Boolean).join(" · ");
+  wrap.appendChild(head);
+  const filt = document.createElement("div");
+  filt.className = "mt-filt";
+  for (const [id, t] of [["all", { label: "Todas", color: "#e3e8ee" }], ...G.types.map((k) => [k, MEETING_TYPES[k]])]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "mt-f" + (type === id ? " on" : "");
+    b.setAttribute("aria-pressed", String(type === id));
+    const dot = document.createElement("i");
+    dot.style.background = t.color;
+    b.append(dot, t.label);
+    b.addEventListener("click", () => { team.mtgTypes[group] = id; renderTeam(); });
+    filt.appendChild(b);
+  }
+  wrap.appendChild(filt);
+  const scale = document.createElement("div");
+  scale.className = "t-lane t-lane-scale";
+  scale.appendChild(document.createElement("span"));
+  const sc = document.createElement("div");
+  sc.className = "t-lane-track scale-only";
+  for (let h = lo; h <= hi; h += 60) {
+    const l = document.createElement("small");
+    l.style.left = pos(h);
+    l.textContent = `${h / 60}h`;
+    sc.appendChild(l);
+  }
+  scale.append(sc, document.createElement("span"), document.createElement("span"));
+  wrap.appendChild(scale);
+  for (const r of rows) {
+    const row = document.createElement("div");
+    row.className = "t-lane" + (r.isMe ? " me" : "");
+    const who = document.createElement("span");
+    who.className = "t-lane-who";
+    who.append(avatar(r), document.createTextNode(short(r)));
+    const tr = document.createElement("div");
+    tr.className = "t-lane-track";
+    for (let h = lo + 60; h < hi; h += 60) {
+      const g = document.createElement("i");
+      g.className = "g";
+      g.style.left = pos(h);
+      tr.appendChild(g);
+    }
+    for (const m of r.jira.filter(pick)) block(tr, m, short(r));
+    if (r.isMe && type === "all") {
+      // as que você marcou continuam editáveis: arrastar, clicar para editar e a bolinha + para marcar
+      attachMeetings({ track: tr, lo, hi }, { date, now: live ? now : null, onChange: rerenderMeetings, only: inGroup });
+    } else {
+      for (const m of r.local.filter(pick)) block(tr, m, short(r));
+    }
+    if (live && now > lo && now < hi) {
+      const n = document.createElement("i");
+      n.className = "now";
+      n.style.left = pos(now);
+      tr.appendChild(n);
+    }
+    const tot = document.createElement("b");
+    tot.className = "t-lane-tot none";
+    const mins = r.list.reduce((s, m) => s + m.end - m.start, 0);
+    tot.textContent = mins ? fmtDur(mins) : "—";
+    const hb = document.createElement("button");
+    const open = team.mtgHist === r.id;
+    hb.type = "button";
+    hb.className = "hist-ic" + (open ? " on" : "");
+    hb.innerHTML = ICON_HIST;
+    hb.title = `Histórico de ${word}`;
+    hb.setAttribute("aria-label", `Histórico de ${word} de ${short(r)}`);
+    hb.setAttribute("aria-expanded", String(open));
+    hb.addEventListener("click", () => { team.mtgHist = open ? null : r.id; renderTeam(); });
+    row.append(who, tr, tot, hb);
+    wrap.appendChild(row);
+    if (open) wrap.appendChild(meetingHistPanel(r, short(r), group));
+  }
+  const foot = document.createElement("p");
+  foot.className = "muted xs";
+  foot.style.margin = "4px 0 0";
+  foot.textContent = group === "execucao"
+    ? "Inclui apontamentos em demandas de refinamento, deploy, configuração e testes: pela Categoria do Jira e, sem categoria, pelo título ou pela descrição. Nada é gravado no Jira."
+    : "Inclui apontamentos em demandas que foram reuniões ou alinhamentos: pela Categoria do Jira e, sem categoria, pelo título ou pela descrição. Nada é gravado no Jira.";
+  wrap.appendChild(foot);
+
+  /* --- agenda: uma linha por reunião, juntando quem esteve na mesma (mesmo título e horário) --- */
+  const agenda = document.createElement("div");
+  agenda.className = "card mt-agenda";
+  const byKey = new Map();
+  for (const r of rows) {
+    for (const m of r.list) {
+      const k = m.jiraKey && m.fromJira ? `${m.jiraKey}|${m.start}` : `${m.type}|${String(m.title).trim().toLowerCase()}|${m.start}`;
+      if (!byKey.has(k)) byKey.set(k, { m, who: [] });
+      byKey.get(k).who.push(r);
+    }
+  }
+  const items = [...byKey.values()].sort((a, b) => a.m.start - b.m.start || a.m.end - b.m.end);
+  const at = document.createElement("div");
+  at.className = "card-t";
+  at.innerHTML = "<b>Agenda do dia</b><span></span>";
+  at.querySelector("span").textContent = items.length ? `${items.length} ${pl(items.length, "item", "itens")}` : "";
+  agenda.appendChild(at);
+  if (!items.length) {
+    const p = document.createElement("p");
+    p.className = "muted xs";
+    p.style.margin = "0";
+    p.textContent = type !== "all" ? "Nada desse tipo neste dia."
+      : team.mtgPending ? "Lendo as demandas do dia…"
+      : group === "execucao" ? "Nenhuma demanda de refinamento, deploy, configuração ou testes apontada neste dia."
+      : "Nenhuma reunião neste dia. Arraste a bolinha + da sua linha até o horário.";
+    agenda.appendChild(p);
+  }
+  for (const { m, who } of items) {
+    const t = MEETING_TYPES[m.type] || MEETING_TYPES.outro;
+    const on = live && m.start <= now && m.end > now;
+    const r = document.createElement("div");
+    r.className = "mt-row" + (on ? " is-now" : "") + (live && m.end <= now ? " past" : "");
+    r.innerHTML = "<time></time><i class=\"mark\"></i><div class=\"mt-txt\"><b></b><small></small></div><span class=\"mt-avs\"></span>";
+    r.querySelector("time").textContent = fmtHM(m.start);
+    r.querySelector(".mark").style.background = t.color;
+    r.querySelector("b").textContent = m.title;
+    const everyone = who.length > 3 && who.length >= rows.length;
+    r.querySelector("small").textContent = [on ? `agora, até ${fmtHM(m.end)}` : `${t.label}, ${fmtDur(m.end - m.start)}`,
+      everyone ? "toda a equipe" : who.map(short).join(", ")].join(" · ");
+    if (m.jiraKey) {
+      const k = document.createElement("span");
+      k.className = "k";
+      k.textContent = ` · ${m.jiraKey}`;
+      r.querySelector("small").appendChild(k);
+    }
+    const avs = r.querySelector(".mt-avs");
+    for (const w of who.slice(0, 4)) { const a = avatar(w); a.title = w.isMe ? "Você" : w.name; avs.appendChild(a); }
+    agenda.appendChild(r);
+  }
+
+  /* --- últimas alterações (as que você marcou) --- */
+  const changes = meetingLog().filter((e) => groupOfType(e.type) === group).sort((a, b) => b.at - a.at).slice(0, 6);
+  const out = [wrap, agenda];
+  if (changes.length) {
+    const ch = document.createElement("div");
+    ch.className = "card mt-changes";
+    ch.innerHTML = "<div class=\"card-t\"><b>Suas últimas alterações</b><span>só neste navegador</span></div>";
+    for (const e of changes) {
+      const r = document.createElement("div");
+      r.className = "mt-chg";
+      r.innerHTML = "<time></time><span></span>";
+      r.querySelector("time").textContent = ago(e.at);
+      r.querySelector("span").textContent = describeChange(e);
+      ch.appendChild(r);
+    }
+    out.push(ch);
+  }
+  return out;
+}
+
+/**
+ * Histórico de reuniões de uma pessoa (botão na linha da visão Reuniões): os apontamentos dela em
+ * demandas que foram reuniões nos últimos 7 ou 30 dias, e, se for você, também as que marcou no +.
+ */
+function meetingHistPanel(r, who, group = "reunioes") {
+  const G = MEETING_GROUPS[group];
+  const days = team.mtgHistDays || 7;
+  const to = todayISO();
+  const from = addDaysIso(to, -(days - 1));
+  const cache = team.mtgHistData || (team.mtgHistData = new Map());
+  const ck = `${r.id}|${from}`;
+  const got = cache.get(ck);
+  if (!got) {
+    cache.set(ck, { loading: true });
+    send("PERSON_MEETINGS", { accountId: r.isMe ? undefined : r.id, from, to })
+      .then((d) => cache.set(ck, { items: d.items || [] }))
+      .catch((e) => cache.set(ck, { error: e.message }))
+      .finally(() => { if (state.mode === "team" && (team.view === "mtg" || team.view === "exec") && team.mtgHist === r.id) renderTeam(); });
+  }
+  const st = cache.get(ck);
+  const type = team.mtgTypes?.[group] || "all";
+  const local = r.isMe ? meetingsBetween(from, to) : [];
+  const linked = new Set(local.map((m) => m.jiraKey).filter(Boolean));
+  const items = [...local, ...(st.items || []).filter((m) => !linked.has(m.jiraKey))]
+    .filter((m) => G.types.includes(m.type) && (type === "all" || m.type === type));
+
+  const box = document.createElement("div");
+  box.className = "mt-hist";
+  const head = document.createElement("div");
+  head.className = "mt-hist-head";
+  const t = document.createElement("b");
+  const word = group === "execucao" ? "execução" : "reuniões";
+  t.textContent = r.isMe ? `Seu histórico de ${word}` : `Histórico de ${word} de ${who}`;
+  const seg = document.createElement("div");
+  seg.className = "seg";
+  for (const n of [7, 30]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = `${n} dias`;
+    b.classList.toggle("on", days === n);
+    b.addEventListener("click", () => { team.mtgHistDays = n; renderTeam(); });
+    seg.appendChild(b);
+  }
+  head.append(t, seg);
+  box.appendChild(head);
+
+  const sum = document.createElement("p");
+  sum.className = "mt-hist-sum";
+  const total = items.reduce((s, m) => s + m.end - m.start, 0);
+  const byDay = new Map();
+  for (const m of items) (byDay.get(m.date) || byDay.set(m.date, []).get(m.date)).push(m);
+  sum.textContent = st.loading ? `Procurando nas demandas apontadas as de ${word}…`
+    : st.error ? `Não deu para ler as demandas: ${st.error}`
+    : items.length ? `${fmtDur(total)} em ${items.length} ${group === "execucao" ? pl(items.length, "atividade", "atividades") : pl(items.length, "reunião", "reuniões")}, em ${byDay.size} ${pl(byDay.size, "dia", "dias")}.`
+    : `Nada de ${word} reconhecido nas demandas apontadas neste período.`;
+  box.appendChild(sum);
+
+  const lo = 8 * 60, span = 11 * 60;
+  for (const day of [...byDay.keys()].sort().reverse()) {
+    const ms = byDay.get(day).sort((a, b) => a.start - b.start);
+    const g = document.createElement("div");
+    g.className = "mt-hist-day";
+    const h = document.createElement("header");
+    h.innerHTML = "<b></b><span></span>";
+    h.querySelector("b").textContent = `${dayShort(day)}${day === to ? ", hoje" : day === addDaysIso(to, -1) ? ", ontem" : ""}`;
+    h.querySelector("span").textContent = `${fmtDur(ms.reduce((s, m) => s + m.end - m.start, 0))}, ${ms.length} ${pl(ms.length, "item", "itens")}`;
+    const strip = document.createElement("div");
+    strip.className = "mt-hist-strip";
+    strip.setAttribute("aria-hidden", "true");
+    for (const m of ms) {
+      const b = document.createElement("i");
+      b.style.left = `${Math.max(0, (m.start - lo) / span) * 100}%`;
+      b.style.width = `${Math.max(1, ((m.end - m.start) / span) * 100)}%`;
+      b.style.background = (MEETING_TYPES[m.type] || MEETING_TYPES.outro).color;
+      strip.appendChild(b);
+    }
+    g.append(h, strip);
+    for (const m of ms) {
+      const ty = MEETING_TYPES[m.type] || MEETING_TYPES.outro;
+      const it = document.createElement("div");
+      it.className = "mt-hist-item";
+      it.innerHTML = "<time></time><i class=\"mark\"></i><div class=\"mt-txt\"><b></b><small></small></div>";
+      it.querySelector("time").innerHTML = `${fmtHM(m.start)}<small>${fmtHM(m.end)}</small>`;
+      it.querySelector(".mark").style.background = ty.color;
+      it.querySelector(".mt-txt b").textContent = m.title;
+      it.querySelector(".mt-txt small").textContent = [ty.label, fmtDur(m.end - m.start),
+        m.fromJira ? `reconhecida ${byLabel(m.by)}` : "marcada no QuickFill"].join(", ");
+      if (m.jiraKey) it.appendChild(jiraLink(m.jiraKey, { base: team.data?.url, label: m.jiraKey }));
+      g.appendChild(it);
+    }
+    box.appendChild(g);
+  }
+  return box;
 }
 
 /** Últimos apontamentos da equipe (ao vivo). */

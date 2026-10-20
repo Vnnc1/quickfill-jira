@@ -2,6 +2,7 @@ import { parseDuration, formatJira, pickEstimate } from "./lib/duration.js";
 import { buildPlan, parseHM, addDays, fmtHM, fmtDur, DEFAULT_WORKDAY } from "./lib/schedule.js";
 import { ROLE, UPDATE_URL } from "./lib/role.js";
 import { stageFrom, termsRx, normName } from "./lib/teamstats.js";
+import { classifyIssue, categoryText, meetingTypeOf } from "./lib/meeting-detect.js";
 
 /* ------------------------------------------------------------------ */
 /* Configuração                                                        */
@@ -2707,6 +2708,17 @@ async function createMeetingIssue(p = {}) {
     catch (e2) { steps.push({ step: "Atribuição", ok: false, detail: e2.message }); }
   }
 
+  if (p.categoryId) {
+    const cat = await categoryField(cfg);
+    if (!cat) steps.push({ step: "Categoria", ok: false, detail: "Campo Categoria não encontrado no Jira." });
+    else {
+      try {
+        await jira(`/rest/api/3/issue/${created.key}`, { method: "PUT", cfg, body: { fields: { [cat.id]: cat.multi ? [{ id: String(p.categoryId) }] : { id: String(p.categoryId) } } } });
+        steps.push({ step: "Categoria preenchida", ok: true });
+      } catch (e) { steps.push({ step: "Categoria", ok: false, detail: e.message }); }
+    }
+  }
+
   const ctx = await loadSubtaskContext(created.key);
   const want = p.status === "done" ? "done" : p.status === "doing" ? "indeterminate" : null;
   const target = want ? ctx.transitions.find((t) => t.toCategory === want) : null;
@@ -2892,6 +2904,118 @@ async function handoffSave(p = {}) {
   return value;
 }
 
+/* ------------------------------------------------------------------ */
+/* Reuniões reconhecidas nas demandas do Jira (só leitura)             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Demandas que foram reuniões ou execução (Planning, alinhamentos, deploy, testes…) reconhecidas pela
+ * Categoria do Jira e, sem categoria, pelo título ou,
+ * sem pista no título, pela descrição (lib/meeting-detect.js). Nada é gravado no Jira.
+ */
+/** Campo "Categoria" das demandas (customfield), achado pelo nome. null se o Jira não tiver. */
+let _catField;
+async function categoryField(cfg) {
+  if (_catField !== undefined) return _catField;
+  try {
+    const fields = await jira("/rest/api/3/field", { cfg });
+    const n = (x) => slug(x.name);
+    const f = (fields || []).find((x) => x.custom && ["categoria", "category", "categoria da demanda"].includes(n(x)))
+      || (fields || []).find((x) => x.custom && /^categoria/.test(n(x)));
+    _catField = f ? { id: f.id, name: f.name, multi: f.schema?.type === "array" } : null;
+  } catch { _catField = null; }
+  return _catField;
+}
+
+/** Opções do campo Categoria na Tarefa do projeto (para o modal de marcar), cada uma com o tipo que representa. */
+async function meetingCategoryOptions(p = {}) {
+  const cfg = await getConfig();
+  const project = String(p.project || cfg.defaultProject || "").toUpperCase();
+  const cat = await categoryField(cfg);
+  if (!cat || !project) return { fieldId: null, options: [] };
+  const type = await issueTypeByName(project, "Tarefa", cfg);
+  let meta = [];
+  try {
+    for (let startAt = 0; ; ) {
+      const page = await jira(`/rest/api/3/issue/createmeta/${encodeURIComponent(project)}/issuetypes/${type.id}?maxResults=200&startAt=${startAt}`, { cfg });
+      const list = page?.fields || page?.values || [];
+      meta = meta.concat(list);
+      startAt += list.length;
+      if (!list.length || startAt >= (page?.total ?? 0)) break;
+    }
+  } catch { meta = []; }
+  const f = meta.find((x) => (x.fieldId || x.key) === cat.id);
+  if (!f) return { fieldId: null, options: [] };
+  return {
+    fieldId: cat.id, name: cat.name, required: !!f.required,
+    options: (f.allowedValues || []).filter((o) => !o.disabled).map((o) => ({ id: String(o.id), value: o.value ?? o.name ?? "", type: meetingTypeOf(o.value ?? o.name)?.type || null })),
+  };
+}
+
+const _mtgClass = new Map();   // key -> { at, res }
+const MTG_CLASS_TTL = 10 * 60 * 1000;
+
+async function meetingClassify(p = {}) {
+  const cfg = await getConfig();
+  const keys = [...new Set((p.keys || []).map(String))].slice(0, 600);
+  const fresh = (k) => { const c = _mtgClass.get(k); return c && Date.now() - c.at < MTG_CLASS_TTL; };
+  const missing = keys.filter((k) => !fresh(k));
+  for (let i = 0; i < missing.length; i += 100) {
+    const chunk = missing.slice(i, i + 100);
+    const cat = await categoryField(cfg);
+    const issues = await runJql(`key in (${chunk.join(", ")})`, ["summary", "description", ...(cat ? [cat.id] : [])], chunk.length, cfg);
+    const found = new Set();
+    for (const it of issues) {
+      found.add(it.key);
+      const r = classifyIssue({ summary: it.fields?.summary, description: it.fields?.description, category: cat ? it.fields?.[cat.id] : null });
+      _mtgClass.set(it.key, { at: Date.now(), res: r ? { ...r, summary: it.fields?.summary || "" } : null });
+    }
+    for (const k of chunk) if (!found.has(k)) _mtgClass.set(k, { at: Date.now(), res: null });
+  }
+  const out = {};
+  for (const k of keys) { const r = _mtgClass.get(k)?.res; if (r) out[k] = r; }
+  return out;
+}
+
+const _personMtg = new Map();   // "conta|de|até" -> { at, data }
+
+/**
+ * Apontamentos de uma pessoa (você, se não vier accountId) em demandas que foram reuniões, no
+ * período: alimenta o histórico das Opções e o histórico de cada pessoa na aba Equipe › Reuniões.
+ */
+async function myMeetings(p = {}) {
+  const cfg = await getConfig();
+  const me = await getMyself(cfg);
+  const who = String(p.accountId || me.accountId);
+  const to = p.to || todayLocal();
+  const from = p.from || addDays(to, -29);
+  const ck = `${who}|${from}|${to}`;
+  const hit = _personMtg.get(ck);
+  if (!p.force && hit && Date.now() - hit.at < 2 * 60 * 1000) return hit.data;
+  const author = who === me.accountId ? "currentUser()" : jqlString(who);
+  const cat = await categoryField(cfg);
+  const issues = await runJql(`worklogAuthor = ${author} AND worklogDate >= "${from}" AND worklogDate <= "${to}"`,
+    ["summary", "description", "status", "worklog", ...(cat ? [cat.id] : [])], 500, cfg);
+  const items = [];
+  const matched = issues.map((it) => ({ it, r: classifyIssue({ summary: it.fields?.summary, description: it.fields?.description, category: cat ? it.fields?.[cat.id] : null }) })).filter((x) => x.r);
+  const res = await mapLimit(matched, 6, async ({ it }) => {
+    const raw = inlineWorklogs(it);
+    return raw ? toCacheLogs(it.key, raw, from, to) : issueWorklogs(it.key, from, to, cfg);
+  });
+  matched.forEach(({ it, r }, i) => {
+    if (!res[i].ok) return;
+    for (const w of res[i].value) {
+      if (w.accountId !== who) continue;
+      items.push({ id: `j${w.id}`, type: r.type, by: r.by, title: it.fields?.summary || it.key, date: w.date, start: w.start,
+        end: Math.min(24 * 60, w.start + w.minutes), jiraKey: it.key, jiraUrl: `${cfg.baseUrl}/browse/${it.key}`,
+        status: it.fields?.status?.name || "", category: r.category || (cat ? categoryText(it.fields?.[cat.id]) : ""), fromJira: true });
+    }
+  });
+  const data = { from, to, accountId: who, items, truncated: issues.length >= 500 };
+  _personMtg.set(ck, { at: Date.now(), data });
+  return data;
+}
+
 /** Chave do arquivo a partir do link do Figma (file/design/proto/board). */
 const figmaFileKey = (url) => String(url || "").match(/figma\.com\/(?:file|design|proto|board)\/([A-Za-z0-9]+)/)?.[1] || null;
 const _figma = { key: "", at: 0, data: null };
@@ -2953,6 +3077,10 @@ const HANDLERS = {
   SAVE_SCRUM_SETTINGS: (p) => saveScrumSettings(p),
   CREATE_DEPLOY_CARD: (p) => createDeployCard(p),
   CREATE_MEETING_ISSUE: (p) => createMeetingIssue(p),
+  MEETING_CLASSIFY: (p) => meetingClassify(p),
+  MY_MEETINGS: (p) => myMeetings(p),
+  PERSON_MEETINGS: (p) => myMeetings(p),
+  MEETING_CATEGORY_OPTIONS: (p) => meetingCategoryOptions(p),
   QA_QUEUE: (p) => qaQueue(p),
   POST_EVIDENCE: (p) => postEvidence(p),
   HANDOFF_GET: (p) => handoffGet(p),

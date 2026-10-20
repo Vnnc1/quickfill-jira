@@ -1403,3 +1403,75 @@ html.float .top-actions .ic { width: 28px; height: 28px; }
 .hist-anim .hist-flow { animation: histDraw .45s cubic-bezier(.2, .8, .2, 1) both; }
 .hist-anim .hist-dot { transform-box: fill-box; transform-origin: center; animation: histPop .25s cubic-bezier(.2, .8, .2, 1) both; }
 @media (prefers-reduced-motion: reduce) { .hist-flow, .hist-dot { animation: none; } }
+
+/* ---------- Reuniões: modelos, equipe ---------- */
+.mtg-tpl-wrap { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.mtg-tpl-head { display: flex; align-items: baseline; justify-content: space-between; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.mtg-tpls { display: flex; flex-wrap: wrap; gap: 6px; }
+.mtg-tpl { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface-2); color: var(--txt); border-radius: var(--r-sm); padding: 6px 9px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; transition: border-color .12s, background-color .12s; }
+.mtg-tpl:hover { border-color: var(--line-strong); }
+.mtg-tpl i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.mtg-tpl small { color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+.mtg-tpl:focus-visible, .mtg-link:focus-visible, .mtg-type:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mtg-link { border: 0; background: none; padding: 2px 0; color: var(--accent); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.mtg-link:hover { text-decoration: underline; }
+/* o modelo escolhido acende os campos que preencheu */
+@keyframes mtgFilled { from { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); } to { border-color: var(--line); box-shadow: none; } }
+.mtg-filled .mtg-f .inp { animation: mtgFilled .7s ease-out; }
+@media (prefers-reduced-motion: reduce) { .mtg-filled .mtg-f .inp { animation: none; } }
+
+/* Equipe › Reuniões: régua, agenda e alterações */
+.mt-lanes { gap: 3px; }
+.mt-filt { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 0 6px; }
+.mt-f { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px 2px 7px; cursor: pointer; }
+.mt-f i { width: 7px; height: 7px; border-radius: 50%; }
+.mt-f.on { color: var(--txt); border-color: var(--accent); background: var(--accent-soft); }
+.mt-f:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.t-lane-track .mt-blk { top: 1px; bottom: 1px; border: 1px solid; box-sizing: border-box; box-shadow: none; min-width: 5px; }
+.mt-lanes .t-lane { cursor: default; }
+.t-lane-track .mt-blk.jira { border-style: dashed; }
+.mt-agenda { gap: 0; }
+.mt-agenda .card-t { padding-bottom: 6px; }
+.mt-row { display: grid; grid-template-columns: 40px 3px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+.mt-row time { font-size: 12px; font-weight: 650; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mt-row.is-now time { color: var(--warn); }
+.mt-row.past { opacity: .62; }
+.mt-row .mark { align-self: stretch; border-radius: 2px; }
+.mt-txt { min-width: 0; }
+.mt-txt b { display: block; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt-txt small { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt-txt .k { font-family: var(--mono); color: var(--accent); }
+.mt-avs { display: flex; padding-left: 5px; }
+.mt-avs .t-av { margin-left: -5px; box-shadow: 0 0 0 2px var(--surface); }
+.mt-changes { gap: 2px; }
+.mt-changes .card-t span a { color: var(--accent); }
+.mt-chg { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 9px; font-size: 11.5px; padding: 3px 0; color: var(--muted); }
+.mt-chg time { font-family: var(--mono); font-size: 10px; color: var(--faint); padding-top: 1px; }
+/* Equipe › Reuniões: histórico de cada pessoa (botão na linha) */
+.mt-lanes .t-lane { grid-template-columns: 112px 1fr 48px 28px; }
+.mt-lanes .hist-ic { width: 24px; height: 24px; }
+.mt-lanes .hist-ic.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.mt-hist { margin: 2px 0 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; animation: qfFloatIn .16s cubic-bezier(.2, .8, .2, 1) both; }
+.mt-hist-head { display: flex; align-items: center; gap: 8px; }
+.mt-hist-head b { flex: 1; font-size: 12.5px; }
+.mt-hist-sum { margin: 0; font-size: 12px; color: var(--muted); }
+.mt-hist-day { display: flex; flex-direction: column; gap: 2px; }
+.mt-hist-day header { display: flex; justify-content: space-between; font-size: 11.5px; }
+.mt-hist-day header b { font-weight: 650; }
+.mt-hist-day header span { color: var(--muted); font-variant-numeric: tabular-nums; }
+.mt-hist-strip { position: relative; height: 10px; border-radius: 3px; background: var(--surface-2); margin: 3px 0 4px; }
+.mt-hist-strip i { position: absolute; top: 2px; bottom: 2px; border-radius: 2px; }
+.mt-hist-item { display: grid; grid-template-columns: 40px 3px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); }
+.mt-hist-item time { font-size: 12px; font-weight: 650; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.mt-hist-item time small { display: block; font-weight: 500; color: var(--faint); }
+.mt-hist-item .mark { align-self: stretch; border-radius: 2px; }
+@media (prefers-reduced-motion: reduce) { .mt-hist { animation: none; } }
+
+/* Equipe: Cartões | Linha do tempo e, à parte, Reuniões | Execução */
+.t-hero .t-views { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.t-hero .t-views .seg { margin-left: 0; }
+/* modal de marcar: tipos em duas linhas, uma por grupo */
+.mtg-types { flex-direction: column; flex-wrap: nowrap; gap: 6px; }
+.mtg-tline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mtg-tgrp { width: 64px; flex: none; font-size: 11.5px; font-weight: 600; color: var(--faint); }
+.mtg-f[hidden] { display: none !important; }
