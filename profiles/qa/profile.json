@@ -1,0 +1,14 @@
+{
+  "version": "4.8.2",
+  "folder": "jira-quickfill-qa",
+  "name": "Jira QuickFill QA",
+  "title": "Jira QuickFill QA",
+  "description": "QA: preenche datas, estimativa, apontamento e status de subtarefas (Testes Manuais), em uma tarefa ou em lote, com painel, equipe e meu dia.",
+  "shortcut": "J",
+  "shortcutHint": "Abrir o modal do Jira QuickFill na aba atual",
+  "frame": [
+    520,
+    700
+  ],
+  "extraHosts": []
+}

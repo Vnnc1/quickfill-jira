@@ -1,0 +1,14 @@
+{
+  "version": "4.8.2",
+  "folder": "jira-quickfill-dev",
+  "name": "Jira QuickFill DEV — Meu progresso",
+  "title": "Jira QuickFill DEV",
+  "description": "DEV: seu dia e seu progresso no Jira — meta do dia, sequência, histórico, suas demandas (com o QA, voltaram, entregues) e a equipe.",
+  "shortcut": "Y",
+  "shortcutHint": "Abrir o QuickFill DEV na aba atual",
+  "frame": [
+    600,
+    760
+  ],
+  "extraHosts": []
+}

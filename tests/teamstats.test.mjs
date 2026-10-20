@@ -5,7 +5,7 @@ import { scrum, design } from "./fixture.mjs";
 import {
   stageFrom, stageOf, isReturn, termsRx, normName, typeGroup, returnCauses, sprintTree,
   sprintHealth, peopleLoad, sprintRisks, designBoard, designStageOf, designRules,
-} from "../jira-quickfill-qa/lib/teamstats.js";
+} from "../src/lib/teamstats.js";
 
 const sprint = scrum.spaces[0].sprints[0];
 

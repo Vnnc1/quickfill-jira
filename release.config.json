@@ -1,6 +1,5 @@
 {
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "branch": "master",
-  "notes": "SCRUM: ao lado do Período, escolha uma sprint anterior (até as 12 últimas) para ver Sprint, Pessoas e Riscos com as demandas dela. Sprint atual volta ao padrão.",
   "private": false
 }

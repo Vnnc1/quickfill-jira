@@ -1,7 +1,7 @@
 /* Testes do histórico da demanda — rode com: npm test */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildHistory, onlyReturns, fmtSpan, LANES } from "../jira-quickfill-qa/lib/history.js";
+import { buildHistory, onlyReturns, fmtSpan, LANES } from "../src/lib/history.js";
 
 const H = (h) => Date.parse(`2026-10-${h}`);
 const tr = (at, fromName, toName, fromStage, toStage, extra = {}) =>

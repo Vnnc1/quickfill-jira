@@ -88,6 +88,12 @@ $novos = @()
 foreach ($p in $lista) {
   $pkg = $info.packages.$p
   if (-not $pkg) { Write-Host "Pacote desconhecido: $p" -ForegroundColor Yellow; continue }
+  # Cada perfil tem a sua versão: se este já está na mais nova, não baixa de novo (a não ser que tenha sido pedido pelo nome).
+  $manAtual = Join-Path (Join-Path $Destino $pkg.folder) "manifest.json"
+  if (-not $Pacotes -and (Test-Path $manAtual)) {
+    $instalada = (Get-Content $manAtual -Raw -Encoding UTF8 | ConvertFrom-Json).version
+    if ($instalada -eq $pkg.version) { Write-Host "  =   $p $instalada já é a versão mais nova"; continue }
+  }
   $zip = Join-Path $env:TEMP "$($pkg.folder).zip"
   Write-Host "Baixando $p $($pkg.version) ..."
   Invoke-WebRequest -Uri $pkg.download -OutFile $zip -Headers $headers -UseBasicParsing

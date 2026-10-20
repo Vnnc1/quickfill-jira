@@ -2,10 +2,11 @@
   "name": "jira-quickfill",
   "private": true,
   "type": "module",
-  "description": "QuickFill para Jira — um código, quatro extensões (QA, DEV, SCRUM, DESIGN)",
+  "description": "QuickFill para Jira — um código (src/), quatro extensões com versões próprias (profiles/)",
   "scripts": {
     "build": "node build.mjs",
-    "zip": "node build.mjs --zip",
-    "test": "node --test \"tests/*.test.mjs\""
+    "test": "node --test \"tests/*.test.mjs\"",
+    "status": "node tools/release.mjs status",
+    "release": "node tools/release.mjs release"
   }
 }

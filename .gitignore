@@ -4,3 +4,5 @@ node_modules/
 Thumbs.db
 # token de leitura gravado pelo instalador (nunca no repositório)
 **/update.local.json
+# pastas geradas pelo build (o código fica em src/, o que é de cada perfil em profiles/)
+/jira-quickfill-*/
