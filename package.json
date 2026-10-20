@@ -1,6 +1,8 @@
 {
   "name": "jira-quickfill",
   "private": true,
+  "license": "MIT",
+  "author": "Almir Vinicius",
   "type": "module",
   "description": "QuickFill para Jira — um código (src/), quatro extensões com versões próprias (profiles/)",
   "scripts": {
