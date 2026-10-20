@@ -10,22 +10,34 @@
     "qa": {
       "version": "4.8.2",
       "folder": "jira-quickfill-qa",
-      "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-qa.zip"
+      "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-qa.zip",
+      "date": "2026-10-20",
+      "notes": "SCRUM: ao lado do Período, escolha uma sprint anterior (até as 12 últimas) para ver Sprint, Pessoas e Riscos com as demandas dela. Sprint atual volta ao padrão.",
+      "hash": ""
     },
     "dev": {
       "version": "4.8.2",
       "folder": "jira-quickfill-dev",
-      "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-dev.zip"
+      "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-dev.zip",
+      "date": "2026-10-20",
+      "notes": "SCRUM: ao lado do Período, escolha uma sprint anterior (até as 12 últimas) para ver Sprint, Pessoas e Riscos com as demandas dela. Sprint atual volta ao padrão.",
+      "hash": ""
     },
     "scrum": {
       "version": "4.8.2",
       "folder": "jira-quickfill-scrum",
-      "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-scrum.zip"
+      "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-scrum.zip",
+      "date": "2026-10-20",
+      "notes": "SCRUM: ao lado do Período, escolha uma sprint anterior (até as 12 últimas) para ver Sprint, Pessoas e Riscos com as demandas dela. Sprint atual volta ao padrão.",
+      "hash": ""
     },
     "design": {
       "version": "4.8.2",
       "folder": "jira-quickfill-design",
-      "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-design.zip"
+      "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-design.zip",
+      "date": "2026-10-20",
+      "notes": "SCRUM: ao lado do Período, escolha uma sprint anterior (até as 12 últimas) para ver Sprint, Pessoas e Riscos com as demandas dela. Sprint atual volta ao padrão.",
+      "hash": ""
     }
   }
 }

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { classifyIssue, groupOfType, MEETING_GROUPS, categoryText } from "../jira-quickfill-qa/lib/meeting-detect.js";
-import { MEETING_TYPES } from "../jira-quickfill-qa/lib/meetings.js";
+import { classifyIssue, groupOfType, MEETING_GROUPS, categoryText } from "../src/lib/meeting-detect.js";
+import { MEETING_TYPES } from "../src/lib/meetings.js";
 
 const t = (summary, category) => classifyIssue({ summary, category })?.type ?? null;
 

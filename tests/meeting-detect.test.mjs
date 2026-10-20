@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { classifyIssue, meetingTypeOf } from "../jira-quickfill-qa/lib/meeting-detect.js";
+import { classifyIssue, meetingTypeOf } from "../src/lib/meeting-detect.js";
 
 const adf = (text) => ({ type: "doc", version: 1, content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
 

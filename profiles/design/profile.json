@@ -1,0 +1,16 @@
+{
+  "version": "4.8.2",
+  "folder": "jira-quickfill-design",
+  "name": "Jira QuickFill DESIGN — HUs e metas",
+  "title": "Jira QuickFill DESIGN",
+  "description": "DESIGN: suas HUs por etapa (fila, em design, revisão, com o dev), quem está aguardando design, meta semanal de entregas, seu dia e a equipe.",
+  "shortcut": "E",
+  "shortcutHint": "Abrir o QuickFill DESIGN na aba atual",
+  "frame": [
+    600,
+    760
+  ],
+  "extraHosts": [
+    "https://api.figma.com/*"
+  ]
+}

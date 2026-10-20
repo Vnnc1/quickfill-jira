@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { uxCol, uxType, baseTitle, uxBoard, uxHandoff, uxDemand, uxProgress, uxFronts, huStage } from "../jira-quickfill-qa/lib/uxboard.js";
+import { uxCol, uxType, baseTitle, uxBoard, uxHandoff, uxDemand, uxProgress, uxFronts, huStage } from "../src/lib/uxboard.js";
 
 const NOW = Date.parse("2026-10-20T15:00:00");
 const D = 24 * 60 * 60 * 1000;

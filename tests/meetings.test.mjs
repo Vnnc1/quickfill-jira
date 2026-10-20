@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { describeChange, ROLE_TEMPLATES, defaultTemplates, MEETING_TYPES } from "../jira-quickfill-qa/lib/meetings.js";
+import { describeChange, ROLE_TEMPLATES, defaultTemplates, MEETING_TYPES } from "../src/lib/meetings.js";
 
 const base = { type: "alinhamento", title: "Alinhamento com QA", date: "2026-10-20", start: 600, end: 615 };
 

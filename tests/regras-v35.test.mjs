@@ -1,8 +1,8 @@
 /* Regras da 3.5: Impedido/Validado, reaberturas, QA fora do WIP, período e Demandas do DEV. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stageFrom, reopenEvents, qaMatcher, peopleLoad, sprintRisks, flowMetrics, sprintHealth } from "../jira-quickfill-qa/lib/teamstats.js";
-import { demandBoard, deployLabel, periodStats, DEMAND_GROUPS } from "../jira-quickfill-qa/lib/devstats.js";
+import { stageFrom, reopenEvents, qaMatcher, peopleLoad, sprintRisks, flowMetrics, sprintHealth } from "../src/lib/teamstats.js";
+import { demandBoard, deployLabel, periodStats, DEMAND_GROUPS } from "../src/lib/devstats.js";
 
 const ms = (iso, h = 12) => Date.parse(`${iso}T${String(h).padStart(2, "0")}:00:00`);
 const T = (at, fromKind, toKind, fromStage, toStage, fromName, toName, by = "q1", byName = "Almir Vinicius") =>
@@ -141,7 +141,7 @@ test("Pessoas: Design UI fica fora das sugestões e das regras de WIP", () => {
 });
 
 test("subtarefa em PR com o pai concluído/validado não conta como em andamento", async () => {
-  const { linkParents, stageOf: st, orphanOpen } = await import("../jira-quickfill-qa/lib/teamstats.js");
+  const { linkParents, stageOf: st, orphanOpen } = await import("../src/lib/teamstats.js");
   const pai = issue({ key: "MEED-2222", kind: "done", status: { id: "d", name: "Concluído", cat: "done" } });
   const sub = issue({ key: "MEED-2338", isSubtask: true, parentKey: "MEED-2222", kind: "feito", status: { id: "p", name: "PR", cat: "indeterminate" } });
   const sub2 = issue({ key: "MEED-2330", isSubtask: true, parentKey: "MEED-2222", kind: "other", status: { id: "a", name: "Em Andamento", cat: "indeterminate" } });
@@ -159,11 +159,11 @@ test("subtarefa em PR com o pai concluído/validado não conta como em andamento
 });
 
 test("PR (pull request) é a coluna de Feito do MEED; PRD continua deploy de produção", async () => {
-  const { feitoLabel } = await import("../jira-quickfill-qa/lib/devstats.js");
+  const { feitoLabel } = await import("../src/lib/devstats.js");
   assert.equal(feitoLabel("MEED", { batch: "MEED", sustentacao: "SUS" }), "PR");
   assert.equal(feitoLabel("SUS", { batch: "MEED", sustentacao: "SUS" }), "Feito");
   assert.equal(feitoLabel("", {}), "Feito / PR");
-  const src = (await import("node:fs")).readFileSync(new URL("../jira-quickfill-qa/background.js", import.meta.url), "utf8");
+  const src = (await import("node:fs")).readFileSync(new URL("../src/background.js", import.meta.url), "utf8");
   const FEITO = eval(src.match(/const FEITO_RX = (\/.*?\/i);/)[1]);
   const PRD = eval(src.match(/const PRD_RX = (\/.*?\/i);/)[1]);
   assert.ok(FEITO.test("pr") && FEITO.test("pull request"));
@@ -171,7 +171,7 @@ test("PR (pull request) é a coluna de Feito do MEED; PRD continua deploy de pro
 });
 
 test("Filas do quadro (Feito/PR, Validação, Impedidas) contam só os cards da sprint, como o Jira", async () => {
-  const { linkParents } = await import("../jira-quickfill-qa/lib/teamstats.js");
+  const { linkParents } = await import("../src/lib/teamstats.js");
   const pai = issue({ key: "SUS-2290", kind: "feito", status: { id: "f", name: "Feito", cat: "indeterminate" } });
   const subFeito = issue({ key: "SUS-2291", isSubtask: true, parentKey: "SUS-2290", kind: "feito", status: { id: "f", name: "Feito", cat: "indeterminate" } });
   const pai2 = issue({ key: "MEED-2262", kind: "other" });

@@ -1,0 +1,14 @@
+{
+  "version": "4.8.2",
+  "folder": "jira-quickfill-scrum",
+  "name": "Jira QuickFill SCRUM — Sprint e equipe",
+  "title": "Jira QuickFill SCRUM",
+  "description": "SCRUM: saúde da sprint (burndown, previsão, velocidade), quem está com o quê, riscos (impedidas, paradas, fila do QA) e a equipe ao vivo.",
+  "shortcut": "K",
+  "shortcutHint": "Abrir o QuickFill SCRUM na aba atual",
+  "frame": [
+    600,
+    760
+  ],
+  "extraHosts": []
+}

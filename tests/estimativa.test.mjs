@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pickEstimate } from "../jira-quickfill-qa/lib/duration.js";
+import { pickEstimate } from "../src/lib/duration.js";
 
 test("estimativa existente não muda quando o campo fica vazio", () => {
   assert.equal(pickEstimate({ typed: "", current: "2m", spent: "30m" }), "");

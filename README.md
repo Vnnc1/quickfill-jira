@@ -44,17 +44,41 @@ As configurações, o token e as metas continuam.
 
 ## Para quem mantém o código
 
-O código fica em `jira-quickfill-qa/`; o `build.mjs` gera os quatro pacotes.
+Um código só, quatro extensões, **cada uma com a sua versão**.
 
 ```
-npm test            # testes das métricas
-npm run build       # gera as pastas das 4 extensões
-npm run zip         # + os .zip em dist/ e o update.json (publicação)
+src/                         código compartilhado: é aqui que se edita
+profiles/<perfil>/           o que é de cada extensão (qa, dev, scrum, design)
+  profile.json               versão, nome, descrição, atalho e permissões extras
+  CHANGELOG.md               o que mudou em cada versão daquele perfil
+  README.md                  manual que vai dentro do pacote
+  files/                     (opcional) arquivos que substituem os de src/ só naquele perfil
+jira-quickfill-<perfil>/     gerado pelo build para testar no Chrome (fora do git)
+dist/<pasta>.zip             o que está publicado de cada perfil
+update.json                  versão, data e notas publicadas de cada perfil
 ```
 
-Para publicar uma versão nova:
-1. Aumente `VERSION` no `build.mjs` e escreva o que mudou em `notes` no `release.config.json`.
-2. Rode `npm test` e `npm run zip`.
-3. Faça `git commit` e `git push`.
+```
+npm test                                  # testes
+npm run build                             # gera as 4 pastas para testar no Chrome
+npm run status                            # versão de cada perfil e quais têm mudança não lançada
+npm run release -- dev -m "o que mudou"   # lança só o DEV (4.8.2 → 4.8.3)
+```
 
-Em até 6 horas o aviso aparece para todos. Detalhes em [DISTRIBUICAO.md](DISTRIBUICAO.md).
+### Lançar uma versão
+
+1. `npm run status` mostra quais perfis mudaram desde a última versão publicada.
+2. Lance só os perfis que a correção atinge:
+   - `npm run release -- dev -m "Hoje: corrige a meta do dia"` → só o DEV sobe (patch: 4.8.2 → 4.8.3);
+   - `npm run release -- dev,scrum -m "..."` → DEV e SCRUM, cada um a partir da sua versão;
+   - `npm run release -- todos --minor -m "..."` → os 4, número do meio (4.8.x → 4.9.0); `--major` → 5.0.0;
+   - `--dry` mostra o que faria sem gravar; separe itens da nota com `;` (viram linhas no CHANGELOG).
+3. O release roda os testes, sobe a versão em `profiles/<perfil>/profile.json`, escreve no
+   `CHANGELOG.md` do perfil, gera o `.zip` **só dos perfis lançados** e atualiza o `update.json` só para eles.
+4. Faça o `git commit` e o `git push` que ele mostra no fim.
+
+Os perfis que não foram lançados continuam com a mesma versão e o mesmo `.zip`: quem usa não recebe aviso.
+Quando o código compartilhado muda, `npm run status` marca os perfis afetados; lance quando fizer sentido para cada um.
+
+Em até 6 horas o aviso aparece para quem usa o perfil lançado, com as notas daquele perfil.
+O instalador só baixa de novo o perfil cuja versão mudou. Detalhes em [DISTRIBUICAO.md](DISTRIBUICAO.md).
