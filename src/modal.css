@@ -1539,3 +1539,31 @@ html.float .top-actions .ic { width: 28px; height: 28px; }
 @container (max-width: 420px) { .ux-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
 .ux-search { display: flex; }
 .ux-search input { width: 100%; box-sizing: border-box; }
+
+/* ===== DESIGN · modal do Figma (Visualizar · Protótipo navegável) ===== */
+.fx-eye { width: 26px; height: 26px; color: var(--faint); }
+.fx-eye.has { color: var(--accent); border-color: var(--accent-line); }
+.fx-back { position: fixed; inset: 0; z-index: 9000; background: rgba(5, 8, 12, .66); display: grid; place-items: center; padding: 14px; animation: fxIn .18s ease-out; }
+.fx-modal { width: min(1100px, 100%); height: min(860px, 100%); display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--line-strong); border-radius: 14px; box-shadow: 0 24px 60px rgba(0, 0, 0, .55); overflow: hidden; }
+.fx-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.fx-ttl { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; }
+.fx-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.fx-bar .seg { margin-left: auto; }
+.fx-sel { flex: 1; min-width: 180px; max-width: 520px; }
+.fx-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; overflow: auto; background: var(--surface-2); }
+.fx-msg { margin: auto; text-align: center; }
+.fx-empty { margin: auto; max-width: 420px; display: flex; flex-direction: column; gap: 8px; align-items: center; text-align: center; }
+.fx-frame { flex: 1; width: 100%; min-height: 360px; border: 0; border-radius: 10px; background: #1e1e1e; }
+.fx-stage { flex: 1; min-height: 0; display: grid; place-items: center; overflow: auto; border-radius: 10px; background: repeating-conic-gradient(var(--surface) 0 25%, var(--surface-3) 0 50%) 0 0 / 18px 18px; }
+.fx-img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; box-shadow: 0 6px 24px rgba(0, 0, 0, .35); }
+.fx-stage.zoom { place-items: start center; }
+.fx-stage.zoom .fx-img { max-width: none; max-height: none; cursor: zoom-out; }
+.fx-cap { text-align: center; }
+.fx-thumbs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.fx-thumb { flex: none; width: 112px; display: flex; flex-direction: column; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); font: inherit; font-size: 10.5px; cursor: pointer; }
+.fx-thumb img { width: 100%; height: 64px; object-fit: cover; object-position: top; border-radius: 5px; background: var(--surface-3); }
+.fx-thumb span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-thumb.on { border-color: var(--accent); color: var(--txt); }
+.fx-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border-top: 1px solid var(--line); }
+@keyframes fxIn { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .fx-back { animation: none; } }

@@ -2652,7 +2652,7 @@ async function uxBoardData(p = {}) {
     const cfg = await getConfig();
     const ux = uxProjectOf(cfg), huProject = uxHuProjectOf(cfg);
     const me = await getMyself(cfg);
-    const uxFields = ["summary", "status", "issuetype", "assignee", "priority", "created", "updated", "parent", "issuelinks", "timespent", "labels", "duedate"];
+    const uxFields = ["summary", "status", "issuetype", "assignee", "priority", "created", "updated", "parent", "issuelinks", "timespent", "labels", "duedate", "description"];
     const raw = await searchWithChangelog(`project = ${jqlString(ux)} AND (statusCategory != Done OR updated >= -190d) ORDER BY updated DESC`, uxFields, 600, cfg);
     const items = raw.map((i) => {
       const f = i.fields || {};
@@ -2678,6 +2678,7 @@ async function uxBoardData(p = {}) {
         spent: Math.round((f.timespent || 0) / 60),
         due: f.duedate || null,
         links: linkKeys(f.issuelinks).filter((l) => !l.key.startsWith(`${ux}-`)),
+        figma: figmaUrlsIn(f.description).length,
       };
     });
 
@@ -3237,6 +3238,212 @@ const figmaFileKey = (url) => String(url || "").match(/figma\.com\/(?:file|desig
 const _figma = { key: "", at: 0, data: null };
 
 /** Telas (frames do 1º nível de cada página) do arquivo do Figma — precisa do token pessoal. */
+/* ---------- Figma nas demandas (modal "Visualizar" e "Protótipo") ---------- */
+
+const FIGMA_URL_RX = /https?:\/\/(?:www\.)?figma\.com\/(?:file|design|proto|board)\/[^\s"\\<>)\]]+/gi;
+const figmaUrlsIn = (obj) => [...new Set(JSON.stringify(obj || "").match(FIGMA_URL_RX) || [])].map((u) => u.replace(/&amp;/g, "&").replace(/[.,;]+$/, ""));
+
+/** Nome amigável do link: o node-name da URL, o título do arquivo ou o tipo. */
+function figmaLabel(url) {
+  const m = url.match(/figma\.com\/(file|design|proto|board)\/[^/]+\/([^?#]+)/);
+  const name = m ? decodeURIComponent(m[2]).replace(/-/g, " ") : "Figma";
+  return { kind: m?.[1] === "proto" ? "proto" : "design", name };
+}
+
+/* Painel "Designs" da demanda (Figma for Jira): vem do GraphQL do Jira, campo experimental
+ * JiraIssue.designs (ExternalDesign/DevOpsDesign). Precisa do cloudId do site no X-Query-Context. */
+const _cloud = { base: "", id: null };
+async function cloudIdOf(cfg) {
+  if (_cloud.base === cfg.baseUrl && _cloud.id) return _cloud.id;
+  const info = await fetch(`${cfg.baseUrl}/_edge/tenant_info`).then((r) => r.json()).catch(() => null);
+  _cloud.base = cfg.baseUrl; _cloud.id = info?.cloudId || null;
+  return _cloud.id;
+}
+
+const DESIGNS_GQL = `query QuickFillDesigns($key: String!, $cloudId: ID!) {
+  jira { issueByKey(key: $key, cloudId: $cloudId) { key
+    designs(first: 20) @optIn(to: "GraphStoreIssueAssociatedDesign") { edges { node { __typename
+      ... on DevOpsDesign { displayName url liveEmbedUrl status }
+      ... on ExternalDesign { extName: displayName extUrl: url extEmbed: liveEmbedUrl extStatus: status }
+    } } }
+  } }
+}`;
+
+const mapDesigns = (conn) => (conn.edges || []).map((e) => {
+  const n = e.node || {};
+  return { name: n.displayName || n.extName || "", url: n.url || n.extUrl || "", embed: n.liveEmbedUrl || n.extEmbed || "", status: n.status || n.extStatus || "" };
+}).filter((d) => d.url);
+
+/** Roda a consulta do painel Designs dentro de uma aba do Jira já aberta (mesma origem e sessão). */
+async function designsInJiraTab(cfg, body, headers) {
+  let tabs = [];
+  try { tabs = await chrome.tabs.query({ url: `${cfg.baseUrl.replace(/\/+$/, "")}/*` }); } catch { /* sem permissão */ }
+  const tab = tabs.find((t) => t.status === "complete" && !t.discarded) || tabs[0];
+  if (!tab) return { err: "nenhuma aba do Jira aberta" };
+  try {
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: "MAIN",
+      args: [body, headers],
+      func: async (b, h) => {
+        try {
+          const r = await fetch("/gateway/api/graphql", { method: "POST", headers: h, body: b, credentials: "same-origin" });
+          const j = await r.json().catch(() => null);
+          return { status: r.status, conn: j?.data?.jira?.issueByKey?.designs || null, msg: j?.errors?.[0]?.message || "" };
+        } catch (e) { return { status: 0, conn: null, msg: String(e?.message || e) }; }
+      },
+    });
+    const out = res?.result || {};
+    return out.conn ? { conn: out.conn } : { err: `${out.status || "?"}${out.msg ? ` ${out.msg.slice(0, 100)}` : ""}` };
+  } catch (e) { return { err: e.message }; }
+}
+
+/** Último motivo de falha do painel Designs (vai para o modal quando não acha nada). */
+let _designsErr = "";
+
+async function issueDesigns(key, cfg) {
+  const cloudId = await cloudIdOf(cfg);
+  if (!cloudId) { _designsErr = "não achei o cloudId do site"; return []; }
+  const body = JSON.stringify({ query: DESIGNS_GQL, variables: { key, cloudId }, operationName: "QuickFillDesigns" });
+  const base = { Accept: "application/json", "Content-Type": "application/json", "X-Query-Context": `ari:cloud:jira::site/${cloudId}` };
+  const errs = [];
+  // 1º dentro de uma aba do Jira aberta neste Chrome: é a mesma chamada que o painel faz (mesma origem,
+  // sessão logada). O campo é experimental e recusa token de API e chamadas vindas da extensão.
+  const viaTab = await designsInJiraTab(cfg, body, base);
+  if (viaTab.conn) { _designsErr = ""; return mapDesigns(viaTab.conn); }
+  errs.push(`aba do Jira: ${viaTab.err}`);
+  const tries = [
+    { headers: { ...base, Authorization: "Basic " + btoa(`${cfg.email}:${cfg.apiToken}`) }, credentials: "omit", label: "token" },
+  ];
+  for (const t of tries) {
+    try {
+      const res = await fetch(`${cfg.baseUrl}/gateway/api/graphql`, { method: "POST", headers: t.headers, credentials: t.credentials, body });
+      const json = await res.json().catch(() => null);
+      const conn = json?.data?.jira?.issueByKey?.designs;
+      if (res.ok && conn) { _designsErr = ""; return mapDesigns(conn); }
+      errs.push(`${t.label}: ${res.status}${json?.errors?.[0]?.message ? ` ${json.errors[0].message.slice(0, 120)}` : ""}`);
+    } catch (e) { errs.push(`${t.label}: ${e.message}`); }
+  }
+  _designsErr = errs.join(" · ");
+  return [];
+}
+
+const DESIGN_STATUS = { READY_FOR_DEVELOPMENT: "Pronto para desenvolvimento", NONE: "", UNKNOWN: "" };
+
+/**
+ * Links do Figma das demandas. Procura, em ordem, em cada chave pedida (o item do UX e as HUs ligadas):
+ * painel Designs (Figma for Jira), links remotos, descrição e comentários. Se não achar nada,
+ * segue um nível pelas ligações da demanda (vínculos e tarefa pai) e procura nelas também.
+ */
+async function figmaLinks(p = {}) {
+  const cfg = await getConfig();
+  const keys = [...new Set((p.keys || []).map(normalizeKey).filter(Boolean))].slice(0, 8);
+  const out = [];
+  const seen = new Set();
+  const searched = new Set();
+  const add = (url, from, where, title, extra = {}) => {
+    const clean = String(url).replace(/&amp;/g, "&").split("#")[0];
+    if (seen.has(clean)) return;
+    seen.add(clean);
+    out.push({ url: clean, from, where, title: title || figmaLabel(clean).name, kind: figmaLabel(clean).kind, ...extra });
+  };
+  const isFigma = (u) => /figma\.com\/(file|design|proto|board)\//i.test(String(u || ""));
+
+  /** Procura numa demanda; devolve as chaves ligadas a ela (para o segundo nível). */
+  async function scan(key) {
+    if (searched.has(key)) return [];
+    searched.add(key);
+    const enc = encodeURIComponent(key);
+    const [issue, remote, props] = await Promise.all([
+      jira(`/rest/api/3/issue/${enc}?fields=description,summary,comment,issuelinks,parent`, { cfg }).catch(() => null),
+      jira(`/rest/api/3/issue/${enc}/remotelink`, { cfg }).catch(() => []),
+      jira(`/rest/api/3/issue/${enc}/properties`, { cfg }).catch(() => null),
+    ]);
+    // Painel "Designs" (Figma for Jira)
+    for (const d of await issueDesigns(key, cfg).catch(() => [])) {
+      add(d.url, key, "painel Designs", d.name, { status: DESIGN_STATUS[d.status] ?? d.status.toLowerCase().replace(/_/g, " ") });
+    }
+    for (const prop of (props?.keys || []).filter((k) => /figma|design/i.test(k.key)).slice(0, 4)) {
+      const val = await jira(`/rest/api/3/issue/${enc}/properties/${encodeURIComponent(prop.key)}`, { cfg }).catch(() => null);
+      for (const url of figmaUrlsIn(val?.value)) add(url, key, "painel Designs");
+    }
+    for (const r of remote || []) if (isFigma(r.object?.url)) add(r.object.url, key, "link remoto", r.object?.title);
+    for (const url of figmaUrlsIn(issue?.fields?.description)) add(url, key, "descrição");
+    for (const c of issue?.fields?.comment?.comments || []) {
+      for (const url of figmaUrlsIn(c.body)) add(url, key, `comentário de ${c.author?.displayName || "alguém"}`);
+    }
+    const f = issue?.fields || {};
+    return [
+      ...(f.issuelinks || []).map((l) => (l.outwardIssue || l.inwardIssue)?.key),
+      f.parent?.key,
+    ].filter(Boolean);
+  }
+
+  const next = (await Promise.all(keys.map(scan))).flat();
+  if (!out.length) {
+    const linked = [...new Set(next)].filter((k) => !searched.has(k)).slice(0, 10);
+    await Promise.all(linked.map(scan));
+  }
+  const order = new Map(keys.map((k, i) => [k, i]));
+  const whereRank = (w) => (w === "painel Designs" ? 0 : w === "link remoto" ? 1 : w === "descrição" ? 2 : 3);
+  out.sort((a, b) => (order.get(a.from) ?? 9) - (order.get(b.from) ?? 9) || whereRank(a.where) - whereRank(b.where) || (a.kind === "design" ? -1 : 1));
+  return { links: out, searched: [...searched], designsError: out.length ? "" : _designsErr, figmaApi: !!cfg.figmaToken, figmaUrl: cfg.figmaUrl || "" };
+}
+
+const figmaNodeOf = (url) => {
+  const m = String(url).match(/[?&]node-id=([^&#]+)/);
+  return m ? decodeURIComponent(m[1]).replace(/-/g, ":") : null;
+};
+
+async function figmaGet(path, token) {
+  const res = await fetch(`https://api.figma.com/v1/${path}`, { headers: { "X-Figma-Token": token } });
+  if (!res.ok) throw new Error(`Figma respondeu ${res.status}${res.status === 403 ? " — o token não tem acesso a este arquivo" : res.status === 404 ? " — arquivo ou tela não encontrado" : ""}.`);
+  return res.json();
+}
+
+const FRAME_TYPES = ["FRAME", "COMPONENT", "COMPONENT_SET", "INSTANCE", "GROUP"];
+const _figmaPrev = new Map();
+
+/**
+ * Imagens das telas de um link do Figma (API com o token das Opções): a tela do node-id,
+ * ou as telas de dentro de uma seção/página, ou as da primeira página do arquivo (até 12).
+ */
+async function figmaPreview(p = {}) {
+  const cfg = await getConfig();
+  const url = String(p.url || "");
+  const fileKey = figmaFileKey(url);
+  if (!fileKey) throw new Error("Link do Figma inválido.");
+  if (!cfg.figmaToken) return { fileKey, frames: [], needToken: true };
+  const cacheKey = `${fileKey}|${figmaNodeOf(url) || ""}`;
+  const hit = _figmaPrev.get(cacheKey);
+  if (hit && Date.now() - hit.at < 20 * 60 * 1000) return hit.data;
+
+  const node = figmaNodeOf(url);
+  let fileName = "", frames = [];
+  if (node) {
+    const json = await figmaGet(`files/${fileKey}/nodes?ids=${encodeURIComponent(node)}&depth=2`, cfg.figmaToken);
+    fileName = json.name || "";
+    const doc = json.nodes?.[node]?.document;
+    if (!doc) throw new Error("Tela não encontrada no arquivo (o node-id do link mudou?).");
+    frames = ["CANVAS", "SECTION"].includes(doc.type)
+      ? (doc.children || []).filter((c) => FRAME_TYPES.includes(c.type) || c.type === "SECTION").map((c) => ({ id: c.id, name: c.name }))
+      : [{ id: doc.id, name: doc.name }];
+  } else {
+    const json = await figmaGet(`files/${fileKey}?depth=2`, cfg.figmaToken);
+    fileName = json.name || "";
+    const page = (json.document?.children || [])[0];
+    frames = (page?.children || []).filter((c) => FRAME_TYPES.includes(c.type) || c.type === "SECTION").map((c) => ({ id: c.id, name: c.name }));
+  }
+  frames = frames.slice(0, 12);
+  if (frames.length) {
+    const imgs = await figmaGet(`images/${fileKey}?ids=${encodeURIComponent(frames.map((f) => f.id).join(","))}&format=png&scale=${frames.length > 1 ? 1 : 2}`, cfg.figmaToken);
+    frames = frames.map((f) => ({ ...f, img: imgs.images?.[f.id] || null }));
+  }
+  const data = { fileKey, fileName, frames, needToken: false };
+  _figmaPrev.set(cacheKey, { at: Date.now(), data });
+  return data;
+}
+
 async function figmaFrames(p = {}) {
   const cfg = await getConfig();
   const fileKey = figmaFileKey(cfg.figmaUrl);
@@ -3304,6 +3511,8 @@ const HANDLERS = {
   HANDOFF_GET: (p) => handoffGet(p),
   HANDOFF_SAVE: (p) => handoffSave(p),
   FIGMA_FRAMES: (p) => figmaFrames(p),
+  FIGMA_LINKS: (p) => figmaLinks(p),
+  FIGMA_PREVIEW: (p) => figmaPreview(p),
   STATUS_MAP: () => statusMap(),
   CHECK_UPDATE: (p) => checkUpdate(p),
   MY_ACTIVITY: (p) => myActivity(p),

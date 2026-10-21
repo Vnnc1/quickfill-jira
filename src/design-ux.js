@@ -56,7 +56,7 @@ function keyEl(key, ux = true) {
   return k;
 }
 
-function row({ key, title, sub, ux = true, right = [], dim = false }) {
+function row({ key, title, sub, ux = true, right = [], dim = false, figma = null }) {
   const r = el("div", `ux-row${dim ? " dim" : ""}`);
   const body = el("div", "ux-body");
   const line = el("div", "ux-line");
@@ -64,7 +64,9 @@ function row({ key, title, sub, ux = true, right = [], dim = false }) {
   line.title = `${key} · ${title}`;
   body.append(line);
   if (sub) body.append(el("div", "ux-sub", sub));
-  r.append(body, ...right.filter(Boolean), D.jiraLink(key, { label: "" }));
+  r.append(body, ...right.filter(Boolean));
+  if (figma) r.append(figmaBtn({ title, ...figma }));
+  r.append(D.jiraLink(key, { label: "" }));
   return r;
 }
 
@@ -188,6 +190,170 @@ function searchNote(box, n) {
 
 const infoLine = (data) => `Espaço ${data.ux} · atualizado ${new Date(data.generatedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}${data.truncated ? " · lista cortada em 600" : ""}`;
 
+/* ---------- Figma: botão de olho e modal (Visualizar · Protótipo navegável) ---------- */
+
+/** Demandas onde procurar o Figma: o item do UX e as HUs ligadas a ele. */
+const figOf = (i) => ({ key: i.key, keys: [i.key, ...(i.links || []).map((l) => l.key)], has: !!i.figma });
+
+const EYE = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+
+function figmaBtn({ title, key, keys, has }) {
+  const b = el("button", `ic fx-eye${has ? " has" : ""}`);
+  b.innerHTML = EYE;
+  b.title = has ? `Ver o protótipo do Figma de ${key}` : `Procurar protótipo do Figma em ${keys.join(", ")}`;
+  b.setAttribute("aria-label", b.title);
+  b.addEventListener("click", (e) => { e.stopPropagation(); openFigma({ title, key, keys }); });
+  return b;
+}
+
+const embedUrl = (url) => {
+  const u = new URL(url);
+  u.hostname = "embed.figma.com";
+  u.searchParams.set("embed-host", "quickfill");
+  if (/\/proto\//.test(u.pathname)) { u.searchParams.set("hide-ui", "1"); u.searchParams.delete("t"); }
+  return u.toString();
+};
+
+let FX = null;   // modal aberto
+
+function closeFigma() {
+  if (!FX) return;
+  document.removeEventListener("keydown", FX.onKey, true);
+  FX.back.remove();
+  FX.opener?.focus?.();
+  FX = null;
+}
+
+async function openFigma({ title, key, keys }) {
+  closeFigma();
+  const back = el("div", "fx-back");
+  const modal = el("div", "fx-modal");
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("aria-label", `Protótipo do Figma · ${key}`);
+  const head = el("div", "fx-head");
+  const ttl = el("div", "fx-ttl");
+  ttl.append(keyEl(key), el("span", "ux-ttl", title || ""));
+  const x = el("button", "ic", "✕");
+  x.setAttribute("aria-label", "Fechar");
+  x.addEventListener("click", closeFigma);
+  head.append(ttl, x);
+  const bar = el("div", "fx-bar");
+  const body = el("div", "fx-body");
+  const foot = el("div", "fx-foot");
+  modal.append(head, bar, body, foot);
+  back.append(modal);
+  back.addEventListener("mousedown", (e) => { if (e.target === back) closeFigma(); });
+  document.body.append(back);
+  FX = { back, opener: document.activeElement, mode: null, link: null, data: null, onKey: (e) => { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); closeFigma(); } } };
+  document.addEventListener("keydown", FX.onKey, true);
+  x.focus();
+  body.replaceChildren(el("p", "muted xs fx-msg", `Procurando o Figma em ${keys.join(", ")} (painel Designs, descrição, comentários e ligações)…`));
+
+  let res;
+  try { res = await D.send("FIGMA_LINKS", { keys }); } catch (e) { body.replaceChildren(el("p", "muted xs fx-msg", e.message)); return; }
+  if (!FX || FX.back !== back) return;
+  FX.data = res;
+  if (!res.links.length) {
+    const m = el("div", "fx-empty");
+    m.append(el("b", null, "Nenhum link do Figma nestas demandas"),
+      el("p", "muted xs", `Procurei no painel Designs, links, descrição e comentários de ${(res.searched || keys).join(", ")} (incluindo as demandas ligadas). Cole o link do protótipo na descrição ou num comentário para ele aparecer aqui.`));
+    if (res.designsError) m.append(el("p", "muted xs", `Painel Designs não respondeu (${res.designsError}). Deixe uma aba do Jira aberta e logada neste Chrome e tente de novo.`));
+    if (res.figmaUrl) { const a = el("button", "btn sm", "Abrir o arquivo do projeto ↗"); a.addEventListener("click", () => window.open(res.figmaUrl, "_blank", "noopener")); m.append(a); }
+    body.replaceChildren(m);
+    return;
+  }
+  FX.link = res.links[0];
+  FX.mode = res.figmaApi && FX.link.kind !== "proto" ? "view" : "proto";
+  drawFigma(bar, body, foot);
+}
+
+function drawFigma(bar, body, foot) {
+  const { links, figmaApi } = FX.data;
+  bar.replaceChildren();
+  if (links.length > 1) {
+    const sel = el("select", "inp sm fx-sel");
+    sel.setAttribute("aria-label", "Link do Figma");
+    links.forEach((l, i) => {
+      const o = el("option", null, `${l.from} · ${l.where || ""}${l.status ? ` · ${l.status}` : ""} · ${l.kind === "proto" ? "Protótipo" : "Design"} · ${l.title}`);
+      o.value = String(i);
+      if (l === FX.link) o.selected = true;
+      sel.append(o);
+    });
+    sel.addEventListener("change", () => { FX.link = links[Number(sel.value)]; drawFigma(bar, body, foot); });
+    bar.append(sel);
+  } else {
+    bar.append(el("span", "muted xs grow", `${FX.link.from} · ${FX.link.where || ""}${FX.link.status ? ` · ${FX.link.status}` : ""} · ${FX.link.kind === "proto" ? "Protótipo" : "Design"} · ${FX.link.title}`));
+  }
+  const segEl = el("div", "seg");
+  for (const [id, label, tip] of [["view", "Visualizar", "Imagem das telas (rápido, sem login no Figma)"], ["proto", "Protótipo navegável", "Navegue no protótipo (precisa estar logado no Figma)"]]) {
+    const b = el("button", FX.mode === id ? "on" : "", label);
+    b.title = tip;
+    b.addEventListener("click", () => { FX.mode = id; drawFigma(bar, body, foot); });
+    segEl.append(b);
+  }
+  bar.append(segEl);
+
+  foot.replaceChildren();
+  const open = el("button", "btn sm primary", "Abrir no Figma ↗");
+  open.addEventListener("click", () => window.open(FX.link.url, "_blank", "noopener"));
+  const copy = el("button", "btn sm", "Copiar link");
+  copy.addEventListener("click", async () => { try { await navigator.clipboard.writeText(FX.link.url); D.toast("Link do Figma copiado.", "ok"); } catch { D.toast("Não deu para copiar."); } });
+  foot.append(open, copy, el("span", "muted xs grow", FX.mode === "proto"
+    ? "Se aparecer a tela de login do Figma, entre com sua conta ou use Abrir no Figma."
+    : "Clique na tela para ampliar."));
+
+  if (FX.mode === "proto") {
+    const f = el("iframe", "fx-frame");
+    f.src = embedUrl(FX.link.url);
+    f.title = `Protótipo do Figma: ${FX.link.title}`;
+    f.allow = "fullscreen; clipboard-write";
+    f.referrerPolicy = "strict-origin-when-cross-origin";
+    body.replaceChildren(f);
+    return;
+  }
+  if (!figmaApi) {
+    const m = el("div", "fx-empty");
+    m.append(el("b", null, "Para ver as telas aqui, coloque o token do Figma nas Opções"),
+      el("p", "muted xs", "Opções › Figma › token pessoal (só leitura). Sem o token, use Protótipo navegável ou Abrir no Figma."));
+    const o = el("button", "btn sm", "Abrir Opções");
+    o.addEventListener("click", () => chrome.runtime.openOptionsPage?.());
+    m.append(o);
+    body.replaceChildren(m);
+    return;
+  }
+  body.replaceChildren(el("p", "muted xs fx-msg", "Gerando as telas no Figma…"));
+  const link = FX.link;
+  D.send("FIGMA_PREVIEW", { url: link.url }).then((pv) => {
+    if (!FX || FX.link !== link || FX.mode !== "view") return;
+    if (!pv.frames.length) return body.replaceChildren(el("p", "muted xs fx-msg", "Nenhuma tela encontrada neste link."));
+    let cur = 0;
+    const stage = el("div", "fx-stage");
+    const img = el("img", "fx-img");
+    const cap = el("div", "muted xs fx-cap");
+    const show = (k) => {
+      cur = k;
+      img.src = pv.frames[k].img || "";
+      img.alt = pv.frames[k].name;
+      cap.textContent = `${pv.fileName ? pv.fileName + " · " : ""}${pv.frames[k].name}${pv.frames.length > 1 ? ` · ${k + 1} de ${pv.frames.length}` : ""}`;
+      thumbs.querySelectorAll("button").forEach((b, i) => b.classList.toggle("on", i === k));
+    };
+    img.addEventListener("click", () => stage.classList.toggle("zoom"));
+    stage.append(img);
+    const thumbs = el("div", "fx-thumbs");
+    pv.frames.forEach((f, k) => {
+      const b = el("button", "fx-thumb");
+      b.title = f.name;
+      const t = el("img"); t.src = f.img || ""; t.alt = "";
+      b.append(t, el("span", null, f.name));
+      b.addEventListener("click", () => show(k));
+      thumbs.append(b);
+    });
+    body.replaceChildren(stage, cap, ...(pv.frames.length > 1 ? [thumbs] : []));
+    show(0);
+  }).catch((e) => { if (FX && FX.link === link) body.replaceChildren(el("p", "muted xs fx-msg", e.message)); });
+}
+
 /* ---------- Quadro ---------- */
 
 export function renderUxBoard(box) {
@@ -224,7 +390,7 @@ export function renderUxBoard(box) {
         : actBtn(did ? "Ligado" : `Ligar a ${a.hu.key}`, () => act({ op: "link", ux: a.item.key, hu: a.hu.key }, () => { UX.done[`link:${a.item.key}`] = 1; }),
           { title: `Cria o vínculo "relaciona" entre ${a.item.key} e ${a.hu.key}` });
       if (did) btn.disabled = true;
-      c.append(row({ key: a.item.key, title: a.item.summary, sub: a.why, dim: !!did, right: [age(a.age), btn] }));
+      c.append(row({ key: a.item.key, title: a.item.summary, sub: a.why, dim: !!did, right: [age(a.age), btn], figma: figOf(a.item) }));
     }
     box.append(c);
   }
@@ -244,7 +410,7 @@ export function renderUxBoard(box) {
         const sub = [i.front, i.assignee ? i.assignee.name : "sem responsável",
           col.id === "done" ? `feito ${brDate(i.doneAt)}${i.spent ? ` · ${fmtH(i.spent)}` : ""}` : i.spent ? `${fmtH(i.spent)} apontadas` : "",
           (i.links || []).length ? `→ ${i.links.map((l) => l.key).join(", ")}` : ""].filter(Boolean).join(" · ");
-        c.append(row({ key: i.key, title: i.summary, sub, right: [chip(i.t), age(i.age, col.id === "done" ? "var(--ok)" : null)] }));
+        c.append(row({ key: i.key, title: i.summary, sub, right: [chip(i.t), age(i.age, col.id === "done" ? "var(--ok)" : null)], figma: figOf(i) }));
       }
     }
     box.append(c);
@@ -282,7 +448,7 @@ export function renderUxDeliveries(box) {
       body.append(top, el("div", "ux-sub", [r.hu.status.name, r.link, r.ux.doneAt ? `protótipo feito em ${brDate(r.ux.doneAt)}` : r.ux.status.name].filter(Boolean).join(" · ")));
       line.append(body);
       if (r.age) line.append(age(r.age));
-      line.append(D.jiraLink(r.hu.key, { label: "" }));
+      line.append(figmaBtn({ title: r.hu.summary || r.ux.summary, key: r.ux.key, keys: [r.ux.key, r.hu.key], has: !!r.ux.figma }), D.jiraLink(r.hu.key, { label: "" }));
       c.append(line);
     }
     box.append(c);
@@ -295,7 +461,7 @@ export function renderUxDeliveries(box) {
     const did = UX.done[`tela:${hu.key}`];
     const btn = actBtn(did ? "Perguntado" : "Tem tela?", () => act({ op: "ask", key: hu.key, text: "Esta HU tem tela nova? Se tiver, abro o protótipo no UX." }, () => { UX.done[`tela:${hu.key}`] = 1; }));
     if (did) btn.disabled = true;
-    np.append(row({ key: hu.key, title: hu.summary, ux: false, dim: !!did, right: [btn] }));
+    np.append(row({ key: hu.key, title: hu.summary, ux: false, dim: !!did, right: [btn], figma: { key: hu.key, keys: [hu.key] } }));
   }
   box.append(np);
 }
@@ -343,7 +509,7 @@ export function renderUxDemand(box) {
         right.push(actBtn("Sem tela", async () => { await setSkipped([...UX.skipped, hu.key]); D.toast(`${hu.key} marcada como sem tela. Não aparece mais aqui (veja em "Provável sem tela").`, "ok"); renderUxDemand(box); }, { title: "Marcar como sem tela: sai desta lista" }));
       }
     }
-    c.append(row({ key: hu.key, title: hu.summary, sub, ux: false, dim: !!did, right }));
+    c.append(row({ key: hu.key, title: hu.summary, sub, ux: false, dim: !!did, right, figma: { key: hu.key, keys: [hu.key, hu.pair?.key].filter(Boolean), has: !!hu.pair?.figma } }));
   }
   if (d.list.length > 40) c.append(el("p", "muted xs", `e mais ${d.list.length - 40}, das mais antigas para as mais novas`));
   box.append(c);
@@ -363,7 +529,7 @@ export function renderUxToday(box) {
     const did = UX.done[`done:${i.key}`];
     const btn = actBtn(did ? "Feito ✓" : "Mover para Feito", () => act({ op: "done", key: i.key }, () => { UX.done[`done:${i.key}`] = 1; }), { pri: true });
     if (did) btn.disabled = true;
-    c1.append(row({ key: i.key, title: i.summary, sub: [`desde ${brDate(i.statusAt)}`, i.spent ? `${fmtH(i.spent)} apontadas` : "", i.due ? `vence ${i.due.slice(8, 10)}/${i.due.slice(5, 7)}` : ""].filter(Boolean).join(" · "), right: [chip(i.t), btn] }));
+    c1.append(row({ key: i.key, title: i.summary, sub: [`desde ${brDate(i.statusAt)}`, i.spent ? `${fmtH(i.spent)} apontadas` : "", i.due ? `vence ${i.due.slice(8, 10)}/${i.due.slice(5, 7)}` : ""].filter(Boolean).join(" · "), right: [chip(i.t), btn], figma: figOf(i) }));
   }
   box.append(c1);
   if (t.arrived.length) {
@@ -372,14 +538,14 @@ export function renderUxToday(box) {
       const did = UX.done[`take:${i.key}`];
       const btn = actBtn(did ? "É sua" : "Assumir", () => act({ op: "take", key: i.key }, () => { UX.done[`take:${i.key}`] = 1; }), { title: "Atribui a você e move para Em andamento" });
       if (did) btn.disabled = true;
-      c2.append(row({ key: i.key, title: i.summary, sub: [`criado ${brDate(i.created)}`, (i.links || []).length ? `ligado a ${i.links[0].key}` : "", i.priority, "sem responsável"].filter(Boolean).join(" · "), right: [btn] }));
+      c2.append(row({ key: i.key, title: i.summary, sub: [`criado ${brDate(i.created)}`, (i.links || []).length ? `ligado a ${i.links[0].key}` : "", i.priority, "sem responsável"].filter(Boolean).join(" · "), right: [btn], figma: figOf(i) }));
     }
     box.append(c2);
   }
   if (t.doneToday.length) {
     const mins = t.doneToday.reduce((s, i) => s + (i.spent || 0), 0);
     const c3 = card("Feito hoje", `${t.doneToday.length} ${t.doneToday.length === 1 ? "item" : "itens"}${mins ? ` · ${fmtH(mins)}` : ""}`);
-    for (const i of t.doneToday) c3.append(row({ key: i.key, title: i.summary, right: [age(0, "var(--ok)")] }));
+    for (const i of t.doneToday) c3.append(row({ key: i.key, title: i.summary, right: [age(0, "var(--ok)")], figma: figOf(i) }));
     box.append(c3);
   }
 }
