@@ -2510,17 +2510,25 @@ function teamMeetingsView(people, range, d, group = "reunioes") {
   return out;
 }
 
+/** Períodos do histórico de reuniões/execução: Hoje, Ontem (dia útil anterior), 7 e 30 dias. */
+const MT_HIST_PERIODS = [["today", "Hoje"], ["yesterday", "Ontem"], [7, "7 dias"], [30, "30 dias"]];
+function mtHistRange(period) {
+  const today = todayISO();
+  if (period === "today") return { from: today, to: today };
+  if (period === "yesterday") { const y = businessStep(today, -1); return { from: y, to: y }; }
+  return { from: addDaysIso(today, -((Number(period) || 7) - 1)), to: today };
+}
+
 /**
  * Histórico de reuniões de uma pessoa (botão na linha da visão Reuniões): os apontamentos dela em
- * demandas que foram reuniões nos últimos 7 ou 30 dias, e, se for você, também as que marcou no +.
+ * demandas que foram reuniões hoje, ontem ou nos últimos 7 ou 30 dias, e, se for você, também as que marcou no +.
  */
 function meetingHistPanel(r, who, group = "reunioes") {
   const G = MEETING_GROUPS[group];
-  const days = team.mtgHistDays || 7;
-  const to = todayISO();
-  const from = addDaysIso(to, -(days - 1));
+  const period = team.mtgHistDays || 7;
+  const { from, to } = mtHistRange(period);
   const cache = team.mtgHistData || (team.mtgHistData = new Map());
-  const ck = `${r.id}|${from}`;
+  const ck = `${r.id}|${from}|${to}`;
   const got = cache.get(ck);
   if (!got) {
     cache.set(ck, { loading: true });
@@ -2545,11 +2553,12 @@ function meetingHistPanel(r, who, group = "reunioes") {
   t.textContent = r.isMe ? `Seu histórico de ${word}` : `Histórico de ${word} de ${who}`;
   const seg = document.createElement("div");
   seg.className = "seg";
-  for (const n of [7, 30]) {
+  for (const [n, label] of MT_HIST_PERIODS) {
     const b = document.createElement("button");
     b.type = "button";
-    b.textContent = `${n} dias`;
-    b.classList.toggle("on", days === n);
+    b.textContent = label;
+    b.classList.toggle("on", period === n);
+    b.setAttribute("aria-pressed", String(period === n));
     b.addEventListener("click", () => { team.mtgHistDays = n; renderTeam(); });
     seg.appendChild(b);
   }
@@ -2564,7 +2573,7 @@ function meetingHistPanel(r, who, group = "reunioes") {
   sum.textContent = st.loading ? `Procurando nas demandas apontadas as de ${word}…`
     : st.error ? `Não deu para ler as demandas: ${st.error}`
     : items.length ? `${fmtDur(total)} em ${items.length} ${group === "execucao" ? pl(items.length, "atividade", "atividades") : pl(items.length, "reunião", "reuniões")}, em ${byDay.size} ${pl(byDay.size, "dia", "dias")}.`
-    : `Nada de ${word} reconhecido nas demandas apontadas neste período.`;
+    : `Nada de ${word} reconhecido nas demandas apontadas ${period === "today" ? "hoje" : period === "yesterday" ? `ontem (${dayShort(from)})` : "neste período"}.`;
   box.appendChild(sum);
 
   const lo = 8 * 60, span = 11 * 60;
@@ -2574,7 +2583,7 @@ function meetingHistPanel(r, who, group = "reunioes") {
     g.className = "mt-hist-day";
     const h = document.createElement("header");
     h.innerHTML = "<b></b><span></span>";
-    h.querySelector("b").textContent = `${dayShort(day)}${day === to ? ", hoje" : day === addDaysIso(to, -1) ? ", ontem" : ""}`;
+    h.querySelector("b").textContent = `${dayShort(day)}${day === todayISO() ? ", hoje" : day === businessStep(todayISO(), -1) ? ", ontem" : ""}`;
     h.querySelector("span").textContent = `${fmtDur(ms.reduce((s, m) => s + m.end - m.start, 0))}, ${ms.length} ${pl(ms.length, "item", "itens")}`;
     const strip = document.createElement("div");
     strip.className = "mt-hist-strip";
