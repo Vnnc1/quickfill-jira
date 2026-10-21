@@ -1,11 +1,11 @@
 {
-  "version": "4.8.2",
+  "version": "4.9.0",
   "private": false,
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "installCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/quickfill.ps1 | iex\"",
   "guide": "https://github.com/Vnnc1/quickfill-jira#readme",
-  "date": "2026-10-20",
-  "notes": "SCRUM: ao lado do Período, escolha uma sprint anterior (até as 12 últimas) para ver Sprint, Pessoas e Riscos com as demandas dela. Sprint atual volta ao padrão.",
+  "date": "2026-10-21",
+  "notes": "Espaço UX: abas Quadro, Entregas e Demanda, com busca; Olho do Figma nas demandas: modal com Visualizar (telas) e Protótipo navegável; O link vem do painel Designs, descrição, comentários e demandas ligadas",
   "packages": {
     "qa": {
       "version": "4.8.2",
@@ -32,12 +32,12 @@
       "hash": ""
     },
     "design": {
-      "version": "4.8.2",
+      "version": "4.9.0",
       "folder": "jira-quickfill-design",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-design.zip",
-      "date": "2026-10-20",
-      "notes": "SCRUM: ao lado do Período, escolha uma sprint anterior (até as 12 últimas) para ver Sprint, Pessoas e Riscos com as demandas dela. Sprint atual volta ao padrão.",
-      "hash": ""
+      "date": "2026-10-21",
+      "notes": "Espaço UX: abas Quadro, Entregas e Demanda, com busca; Olho do Figma nas demandas: modal com Visualizar (telas) e Protótipo navegável; O link vem do painel Designs, descrição, comentários e demandas ligadas",
+      "hash": "90ca7479eca5f4c1"
     }
   }
 }
