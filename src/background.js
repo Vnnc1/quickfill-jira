@@ -3702,12 +3702,13 @@ const nativePing = async () => { try { await nativeCall({ action: "ping" }); ret
 const nativeUpdate = () => nativeCall({ action: "update", package: ROLE });
 
 /* ---------- Notificação do Windows quando sair versão nova ----------
- * Verifica a cada 3 h (o update.json fica em cache por 6 h) e ao abrir o Chrome. Uma notificação por versão.
+ * Verifica a cada 15 min (o update.json fica guardado por 10 min; o raw do GitHub tem ~5 min de cache)
+ * e ao abrir o Chrome: um release chega em minutos. Uma notificação por versão.
  * O botão da notificação atualiza pelo ajudante (um clique) ou, sem ele, abre as Opções para ativar. */
 
 const ROLE_LABEL = { qa: "QA", dev: "DEV", scrum: "SCRUM", design: "DESIGN" }[ROLE] || "";
 const NOTIF_ID = "qf-update";
-chrome.alarms?.create("qf-update-check", { delayInMinutes: 1, periodInMinutes: 180 });
+chrome.alarms?.create("qf-update-check", { delayInMinutes: 1, periodInMinutes: 15 });
 chrome.alarms?.onAlarm.addListener((a) => { if (a.name === "qf-update-check") notifyIfUpdate(); });
 chrome.runtime.onStartup?.addListener(() => notifyIfUpdate());
 
@@ -3765,14 +3766,15 @@ async function updateToken(cfg) {
   return "";
 }
 
-/** Lê o update.json do repositório (no máximo a cada 6 h) e diz se há versão nova deste pacote. */
+/** Lê o update.json do repositório (no máximo a cada 10 min) e diz se há versão nova deste pacote. */
+const UPDATE_CACHE_MS = 10 * 60 * 1000;
 async function checkUpdate(p = {}) {
   const cfg = await getConfig();
   const url = (cfg.updateUrl || UPDATE_URL || "").trim();
   const current = chrome.runtime.getManifest().version;
   if (!url) return { configured: false, current };
   const { updateCheck } = await chrome.storage.local.get({ updateCheck: null });
-  if (!p.force && updateCheck?.url === url && Date.now() - updateCheck.at < 6 * 3600 * 1000) return { ...updateCheck.data, current, newer: newer(updateCheck.data.latest, current) };
+  if (!p.force && updateCheck?.url === url && Date.now() - updateCheck.at < UPDATE_CACHE_MS) return { ...updateCheck.data, current, newer: newer(updateCheck.data.latest, current) };
   const token = await updateToken(cfg);
   const headers = url.includes("api.github.com")
     ? { Accept: "application/vnd.github.raw+json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }

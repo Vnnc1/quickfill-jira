@@ -19,7 +19,7 @@ Não precisa mandar arquivo nenhum. O instalador sempre baixa a versão mais nov
   Se o Documentos estiver no OneDrive, vai para lá.
 - O instalador atualiza só os perfis que a pessoa já tem. Para instalar outro, basta rodar e escolher.
 
-Para atualizações o sistema retorna qualquer atualização em até 6 horas, quem abrir o QuickFill vê o aviso de versão nova.
+Para atualizações o sistema retorna qualquer atualização em uns 20 minutos (a partir da versão com a verificação a cada 15 min), quem abrir o QuickFill vê o aviso de versão nova.
 
 ## Como funciona o botão "Atualizar agora"
 

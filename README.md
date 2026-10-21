@@ -80,5 +80,5 @@ npm run release -- dev -m "o que mudou"   # lança só o DEV (4.8.2 → 4.8.3)
 Os perfis que não foram lançados continuam com a mesma versão e o mesmo `.zip`: quem usa não recebe aviso.
 Quando o código compartilhado muda, `npm run status` marca os perfis afetados; lance quando fizer sentido para cada um.
 
-Em até 6 horas o aviso aparece para quem usa o perfil lançado, com as notas daquele perfil.
+Em uns 20 minutos o aviso aparece para quem usa o perfil lançado, com as notas daquele perfil.
 O instalador só baixa de novo o perfil cuja versão mudou. Detalhes em [DISTRIBUICAO.md](DISTRIBUICAO.md).
