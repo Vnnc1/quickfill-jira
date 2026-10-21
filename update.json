@@ -1,43 +1,43 @@
 {
-  "version": "4.9.1",
+  "version": "4.9.2",
   "private": false,
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "installCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/quickfill.ps1 | iex\"",
   "guide": "https://github.com/Vnnc1/quickfill-jira#readme",
   "date": "2026-10-21",
-  "notes": "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão; DESIGN cria no espaço UX",
+  "notes": "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)",
   "packages": {
     "qa": {
-      "version": "4.8.3",
+      "version": "4.8.4",
       "folder": "jira-quickfill-qa",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-qa.zip",
       "date": "2026-10-21",
-      "notes": "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão; DESIGN cria no espaço UX",
-      "hash": "5eddee824a2c36eb"
+      "notes": "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)",
+      "hash": "93894dfec1d8e72c"
     },
     "dev": {
-      "version": "4.8.3",
+      "version": "4.8.4",
       "folder": "jira-quickfill-dev",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-dev.zip",
       "date": "2026-10-21",
-      "notes": "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão; DESIGN cria no espaço UX",
-      "hash": "d69fa48b2cda1253"
+      "notes": "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)",
+      "hash": "ea5926048edb3b64"
     },
     "scrum": {
-      "version": "4.8.3",
+      "version": "4.8.4",
       "folder": "jira-quickfill-scrum",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-scrum.zip",
       "date": "2026-10-21",
-      "notes": "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão; DESIGN cria no espaço UX",
-      "hash": "035232134a6b44dd"
+      "notes": "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)",
+      "hash": "37c6852f8e236443"
     },
     "design": {
-      "version": "4.9.1",
+      "version": "4.9.2",
       "folder": "jira-quickfill-design",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-design.zip",
       "date": "2026-10-21",
-      "notes": "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão; DESIGN cria no espaço UX",
-      "hash": "e2d0c1a39c683cf7"
+      "notes": "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)",
+      "hash": "fad35dd8d1dd4361"
     }
   }
 }
