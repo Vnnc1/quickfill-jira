@@ -1,43 +1,43 @@
 {
-  "version": "4.9.2",
+  "version": "4.9.3",
   "private": false,
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "installCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/quickfill.ps1 | iex\"",
   "guide": "https://github.com/Vnnc1/quickfill-jira#readme",
   "date": "2026-10-21",
-  "notes": "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)",
+  "notes": "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint); Sprint separada e busca nas Demandas; Concluído conta como entregue; Equipe a cada 30 s com pausa automática do Jira",
   "packages": {
     "qa": {
-      "version": "4.8.4",
+      "version": "4.8.5",
       "folder": "jira-quickfill-qa",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-qa.zip",
       "date": "2026-10-21",
-      "notes": "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)",
-      "hash": "93894dfec1d8e72c"
+      "notes": "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint); Sprint separada e busca nas Demandas; Concluído conta como entregue; Equipe a cada 30 s com pausa automática do Jira",
+      "hash": "a6f6a22ba29bc140"
     },
     "dev": {
-      "version": "4.8.4",
+      "version": "4.8.5",
       "folder": "jira-quickfill-dev",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-dev.zip",
       "date": "2026-10-21",
-      "notes": "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)",
-      "hash": "ea5926048edb3b64"
+      "notes": "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint); Sprint separada e busca nas Demandas; Concluído conta como entregue; Equipe a cada 30 s com pausa automática do Jira",
+      "hash": "863f032b01951d34"
     },
     "scrum": {
-      "version": "4.8.4",
+      "version": "4.8.5",
       "folder": "jira-quickfill-scrum",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-scrum.zip",
       "date": "2026-10-21",
-      "notes": "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)",
-      "hash": "37c6852f8e236443"
+      "notes": "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint); Sprint separada e busca nas Demandas; Concluído conta como entregue; Equipe a cada 30 s com pausa automática do Jira",
+      "hash": "5c16b07dd6877a47"
     },
     "design": {
-      "version": "4.9.2",
+      "version": "4.9.3",
       "folder": "jira-quickfill-design",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-design.zip",
       "date": "2026-10-21",
-      "notes": "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)",
-      "hash": "fad35dd8d1dd4361"
+      "notes": "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint); Sprint separada e busca nas Demandas; Concluído conta como entregue; Equipe a cada 30 s com pausa automática do Jira",
+      "hash": "c5489be37b0eccd5"
     }
   }
 }
