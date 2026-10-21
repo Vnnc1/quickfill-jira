@@ -1606,3 +1606,10 @@ html.float .top-actions .ic { width: 28px; height: 28px; }
 @media (prefers-reduced-motion: reduce) { .mtg-side, .mtg-side-tog svg { transition: none; } }
 .mtg-card-seg { margin-left: 0; align-self: flex-start; flex-wrap: wrap; }
 .mtg-card-seg button { font-variant-numeric: tabular-nums; }
+
+/* Demandas: período com Ontem, Sprint e um dia escolhido */
+.pane[data-pane="demands"] > .m-tools { flex-wrap: wrap; }
+.pane[data-pane="demands"] > .m-tools > .grow { flex-basis: 100%; order: 9; }
+.inp.dm-day { flex: 0 0 140px; width: 140px; min-width: 140px; height: 30px; padding: 0 8px; font-size: 12px; box-sizing: border-box; }
+.inp.dm-day.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+#qaPeriodBar { flex-wrap: wrap; }

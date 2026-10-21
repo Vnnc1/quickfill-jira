@@ -123,7 +123,9 @@
         <button data-p="7" class="on">7 dias</button>
         <button data-p="14">14 dias</button>
         <button data-p="30">30 dias</button>
+        <button data-p="sprint" title="Desde o início da sprint atual">Sprint</button>
       </div>
+      <input type="date" id="qaDay" class="inp sm dm-day" title="Ver um dia específico" aria-label="Escolher um dia" />
     </div>
 
     <!-- Período (SCRUM): vale para Sprint, Pessoas e Riscos -->
@@ -180,11 +182,14 @@
       <section class="pane hidden" data-pane="demands">
         <div class="m-tools">
           <div class="seg" id="dmPeriod">
-            <button data-period="today" class="on" title="O que está em seu nome agora">Hoje</button>
+            <button data-period="today" class="on" title="O que está em seu nome agora e o que mudou hoje">Hoje</button>
+            <button data-period="yesterday" title="O dia útil anterior">Ontem</button>
             <button data-period="7">7 dias</button>
             <button data-period="14">14 dias</button>
             <button data-period="30">30 dias</button>
+            <button data-period="sprint" title="Desde o início da sprint atual">Sprint</button>
           </div>
+          <input type="date" id="dmDay" class="inp sm dm-day" title="Ver um dia específico" aria-label="Escolher um dia" />
           <span class="muted xs grow" id="dmInfo"></span>
           <button class="ic bordered" id="dmRefresh" title="Atualizar">↻</button>
         </div>

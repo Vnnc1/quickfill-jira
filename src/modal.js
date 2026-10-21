@@ -9,6 +9,7 @@ import { loadMeetings, onMeetingsChange, meetingMinutes, attachMeetings, meeting
   meetingsOn, meetingsBetween, meetingLog, describeChange, ago, MEETING_TYPES, MEETING_GROUPS, groupOfType, rgba as mtgRgba } from "./lib/meetings.js";
 import { byLabel } from "./lib/meeting-detect.js";
 import { addDaysIso, isWeekendIso, DAY_MS } from "./lib/dates.js";
+import { periodRange, normPeriod } from "./lib/period.js";
 import { totalOf, byIssue, streakAt, averageBefore, averageUntil, periodStats, weekCompare, countedDays, demandBoard, deployLabel, feitoLabel, DEMAND_GROUPS } from "./lib/devstats.js";
 import { STAGES, RISKS, DESIGN_STAGES, HANDOFF_ITEMS, TYPE_LABEL, stageOf, typeGroup, normName, sprintHealth, sprintTree, peopleLoad,
   sprintRisks, returnCauses, designBoard, businessAge, lastMove, reopenEvents, qaMatcher, flowMetrics, linkParents } from "./lib/teamstats.js";
@@ -1555,18 +1556,21 @@ function panelFiltered(scoped) {
     (kpi !== "nodue" || !i.due));
 }
 
-/* ---------- Período do QA (Hoje · 7 · 14 · 30 dias) ---------- */
+/* ---------- Período do QA (Hoje · Ontem · 7 · 14 · 30 dias · Sprint · um dia escolhido) ---------- */
 
-const QP = { period: "7" };
+const QP = { period: "7", day: "", sprint: null };
 try { QP.period = localStorage.getItem("qf.qaPeriod") || "7"; } catch { /* sem storage */ }
-const QP_LABEL = { today: "hoje", yesterday: "ontem", 7: "em 7 dias", 14: "em 14 dias", 30: "em 30 dias" };
-const qpDays = () => (QP.period === "today" || QP.period === "yesterday" ? 1 : Number(QP.period));
+if (QP.period === "day") QP.period = "today";   // um dia escolhido não fica salvo
+/** Período completo (lib/period.js): de/até, rótulo para frases ("hoje", "ontem (sex 17/10)", "em 7 dias"…). */
+const qpR = () => periodRange(QP.period, { today: todayISO(), day: QP.day, sprint: QP.sprint });
+const qpLabel = () => qpR().label;
+const qpDays = () => qpR().days;
 /** "Ontem" = o dia útil anterior (na segunda, a sexta). */
 const qpYesterday = () => businessStep(todayISO(), -1);
-/** Intervalo do período escolhido (ms). Ontem é só aquele dia; os outros vão até agora. */
+/** Intervalo do período escolhido (ms). Um dia passado é só aquele dia; o que chega até hoje vai até agora. */
 function qpRange() {
-  if (QP.period === "yesterday") { const y = qpYesterday(); return { from: Date.parse(`${y}T00:00:00`), to: Date.parse(`${y}T23:59:59.999`) }; }
-  return { from: Date.parse(`${addDaysIso(todayISO(), -(qpDays() - 1))}T00:00:00`), to: Infinity };
+  const r = qpR();
+  return { from: r.fromMs, to: r.now ? Infinity : r.toMs };
 }
 const qpFrom = () => qpRange().from;
 const inQp = (ms) => { const r = qpRange(); return !!ms && ms >= r.from && ms <= r.to; };
@@ -1575,13 +1579,33 @@ const dueInPeriod = (i) => !!i.due && i.due >= todayISO() && i.due <= addDaysIso
 /** Teve alguma atualização no período. */
 const movedInPeriod = (i) => !!i.updated && inQp(Date.parse(i.updated));
 
-function setQaPeriod(p) {
-  QP.period = p;
-  document.querySelectorAll("#qaPeriod button").forEach((b) => b.classList.toggle("on", b.dataset.p === p));
-  try { localStorage.setItem("qf.qaPeriod", p); } catch { /* sem storage */ }
+function paintQaPeriod() {
+  document.querySelectorAll("#qaPeriod button").forEach((b) => b.classList.toggle("on", QP.period !== "day" && b.dataset.p === QP.period));
+  const d = $("qaDay");
+  if (!d) return;
+  d.max = todayISO();
+  d.min = addDaysIso(todayISO(), -59);
+  d.value = QP.period === "day" ? QP.day : "";
+  d.classList.toggle("on", QP.period === "day");
+}
+/** Sprint atual do espaço escolhido (em "Todos", a que começou primeiro). */
+async function qaSprint() {
+  const info = await send("SPRINT_INFO", {}).catch(() => ({ spaces: [] }));
+  const act = (info.spaces || []).filter((sp) => !gspace.project || sp.project === gspace.project)
+    .flatMap((sp) => (sp.active || []).filter((a) => a.start));
+  return act.sort((a, b) => String(a.start).localeCompare(String(b.start)))[0] || null;
+}
+async function setQaPeriod(p, day = "") {
+  QP.period = p; QP.day = day;
+  if (p === "sprint") {
+    QP.sprint = await qaSprint();
+    if (!QP.sprint) { toast("Não achei a sprint atual deste espaço: mostrando 7 dias.", "info"); QP.period = "7"; }
+  }
+  paintQaPeriod();
+  try { localStorage.setItem("qf.qaPeriod", QP.period); } catch { /* sem storage */ }
   if (state.mode === "panel") renderPanel();
   if (state.mode === "qaq") renderQaQueue();
-  if (state.mode === "day") loadDay(p === "yesterday" ? qpYesterday() : p === "today" ? todayISO() : state.dayDate);
+  if (state.mode === "day") loadDay(QP.period === "yesterday" ? qpYesterday() : QP.period === "day" ? QP.day : QP.period === "today" ? todayISO() : state.dayDate);
 }
 
 /* ---------- Demandas em que você atuou, em qualquer status (Painel › Todas e Tarefa › recentes) ---------- */
@@ -1646,7 +1670,7 @@ function renderActivity(box) {
     && (!term || [i.key, i.summary, i.parentKey, i.status].some((v) => String(v || "").toLowerCase().includes(term))));
   const k = el("div", "quick-row");
   const kp = (n, label) => { const b = el("div", "quick"); b.append(el("b", null, String(n)), el("span", null, label)); return b; };
-  k.append(kp(list.length, `atualizadas ${QP_LABEL[QP.period]}`),
+  k.append(kp(list.length, `atualizadas ${qpLabel()}`),
     kp(list.filter((i) => i.statusCategory === "done").length, "concluídas"),
     kp(list.filter((i) => i.statusCategory === "indeterminate").length, "em andamento"),
     kp(list.filter((i) => i.lastMove?.byMe || (i.myLastMove && inQp(i.myLastMove.at))).length, "você moveu"),
@@ -1659,7 +1683,7 @@ function renderActivity(box) {
     if (d !== last) { last = d; card.appendChild(el("div", "group", dayLabel(d))); }
     card.appendChild(activityRow(it, ACT.data.url));
   }
-  if (!list.length) card.appendChild(el("div", "empty", term ? "Nada com essa busca." : `Nenhuma demanda sua atualizada ${QP_LABEL[QP.period]}.`));
+  if (!list.length) card.appendChild(el("div", "empty", term ? "Nada com essa busca." : `Nenhuma demanda sua atualizada ${qpLabel()}.`));
   if (list.length > 120) card.appendChild(el("p", "muted xs", `+ ${list.length - 120} — refine a busca.`));
   box.appendChild(card);
   if (ACT.data.truncated) note(box, "warn", "Mais de 300 demandas nos últimos 30 dias: mostrando as atualizadas mais recentemente.");
@@ -1715,7 +1739,7 @@ function renderPanel() {
     ["doing", "Em andamento", scoped.filter((i) => i.statusCategory === "indeterminate").length],
     ["todo", "A fazer", scoped.filter((i) => i.statusCategory === "new").length],
     ["tests", DEF.subtaskName || "Testes Manuais", scoped.filter((i) => i.isSubtask && i.summary.toLowerCase().includes(tests)).length],
-    ["moved", `Movimentadas ${QP_LABEL[QP.period]}`, scoped.filter(movedInPeriod).length],
+    ["moved", `Movimentadas ${qpLabel()}`, scoped.filter(movedInPeriod).length],
   ];
   const quick = el("div", "quick-row");
   for (const [id, label, n] of QUICK) {
@@ -1747,7 +1771,7 @@ function renderPanel() {
   kpis.classList.add("three");
   kpis.append(
     tile("overdue", k.overdue, "atrasadas", k.overdue ? "err" : ""),
-    tile("due", k.due, qpDays() === 1 ? "vencem hoje" : `vencem em ${QP.period} dias`, k.due ? "warn" : ""),
+    tile("due", k.due, qpDays() === 1 ? "vencem hoje" : `vencem em ${qpDays()} dias`, k.due ? "warn" : ""),
     tile("nodue", k.nodue, "sem data limite"),
   );
   box.appendChild(kpis);
@@ -1762,7 +1786,7 @@ function renderPanel() {
   t1.append(document.createTextNode("Distribuição por status"));
   const t1s = document.createElement("span");
   const doneN = d.done ? d.done.filter((x) => inQp(x.at) && (!gspace.project || x.project === gspace.project)).length : d.kpi.doneWeek;
-  t1s.textContent = `✓ ${doneN} concluída${doneN === 1 ? "" : "s"} ${QP_LABEL[QP.period]}`;
+  t1s.textContent = `✓ ${doneN} concluída${doneN === 1 ? "" : "s"} ${qpLabel()}`;
   t1.appendChild(t1s);
   sum.appendChild(t1);
   const hrs = document.createElement("div");
@@ -1814,7 +1838,7 @@ function renderPanel() {
   card.className = "card";
   const lt = document.createElement("div");
   lt.className = "card-t";
-  lt.append(document.createTextNode(P.status || (P.kpi === "overdue" ? "Atrasadas" : P.kpi === "due" ? (qpDays() === 1 ? "Vencem hoje" : `Vencem em ${QP.period} dias`) : P.kpi === "nodue" ? "Sem data limite" : "Minhas demandas")));
+  lt.append(document.createTextNode(P.status || (P.kpi === "overdue" ? "Atrasadas" : P.kpi === "due" ? (qpDays() === 1 ? "Vencem hoje" : `Vencem em ${qpDays()} dias`) : P.kpi === "nodue" ? "Sem data limite" : "Minhas demandas")));
   const lts = document.createElement("span");
   lts.textContent = `${list.length} de ${scoped.length}`;
   lt.appendChild(lts);
@@ -2510,13 +2534,22 @@ function teamMeetingsView(people, range, d, group = "reunioes") {
   return out;
 }
 
-/** Períodos do histórico de reuniões/execução: Hoje, Ontem (dia útil anterior), 7 e 30 dias. */
+/**
+ * Períodos do histórico de reuniões/execução, contados a partir do dia aberto na Equipe:
+ * com outro dia no calendário, "Hoje" vira aquele dia, "Ontem" o dia útil antes dele e 7/30 dias terminam nele.
+ */
 const MT_HIST_PERIODS = [["today", "Hoje"], ["yesterday", "Ontem"], [7, "7 dias"], [30, "30 dias"]];
-function mtHistRange(period) {
-  const today = todayISO();
-  if (period === "today") return { from: today, to: today };
-  if (period === "yesterday") { const y = businessStep(today, -1); return { from: y, to: y }; }
-  return { from: addDaysIso(today, -((Number(period) || 7) - 1)), to: today };
+function mtHistRange(period, base = team.date || todayISO()) {
+  if (period === "today") return { from: base, to: base };
+  if (period === "yesterday") { const y = businessStep(base, -1); return { from: y, to: y }; }
+  return { from: addDaysIso(base, -((Number(period) || 7) - 1)), to: base };
+}
+/** Nome do botão: "Hoje"/"Ontem" quando a Equipe está em hoje; com outro dia, o próprio dia e o anterior. */
+function mtHistLabel(period, label, base = team.date || todayISO()) {
+  if (base === todayISO()) return label;
+  if (period === "today") return dayShort(base);
+  if (period === "yesterday") return dayShort(businessStep(base, -1));
+  return label;
 }
 
 /**
@@ -2556,7 +2589,7 @@ function meetingHistPanel(r, who, group = "reunioes") {
   for (const [n, label] of MT_HIST_PERIODS) {
     const b = document.createElement("button");
     b.type = "button";
-    b.textContent = label;
+    b.textContent = mtHistLabel(n, label);
     b.classList.toggle("on", period === n);
     b.setAttribute("aria-pressed", String(period === n));
     b.addEventListener("click", () => { team.mtgHistDays = n; renderTeam(); });
@@ -2572,8 +2605,8 @@ function meetingHistPanel(r, who, group = "reunioes") {
   for (const m of items) (byDay.get(m.date) || byDay.set(m.date, []).get(m.date)).push(m);
   sum.textContent = st.loading ? `Procurando nas demandas apontadas as de ${word}…`
     : st.error ? `Não deu para ler as demandas: ${st.error}`
-    : items.length ? `${fmtDur(total)} em ${items.length} ${group === "execucao" ? pl(items.length, "atividade", "atividades") : pl(items.length, "reunião", "reuniões")}, em ${byDay.size} ${pl(byDay.size, "dia", "dias")}.`
-    : `Nada de ${word} reconhecido nas demandas apontadas ${period === "today" ? "hoje" : period === "yesterday" ? `ontem (${dayShort(from)})` : "neste período"}.`;
+    : items.length ? `${from !== to && to !== todayISO() ? `De ${brShort(from)} a ${brShort(to)}: ` : ""}${fmtDur(total)} em ${items.length} ${group === "execucao" ? pl(items.length, "atividade", "atividades") : pl(items.length, "reunião", "reuniões")}, em ${byDay.size} ${pl(byDay.size, "dia", "dias")}.`
+    : `Nada de ${word} reconhecido nas demandas apontadas ${period === "today" ? (from === todayISO() ? "hoje" : `em ${dayShort(from)}`) : period === "yesterday" ? (to === businessStep(todayISO(), -1) ? `ontem (${dayShort(from)})` : `em ${dayShort(from)}`) : "neste período"}.`;
   box.appendChild(sum);
 
   const lo = 8 * 60, span = 11 * 60;
@@ -3560,7 +3593,7 @@ const PREF_GROUPS = [
   ]],
 ];
 const DV = { prog: null, date: todayISO(), team: null, teamDate: null, prefs: { ...PREFS_DEFAULT }, period: "14", sprints: null,
-  dm: null, dmPeriod: "today", dmPrio: "", poll: null, seq: 0, sprintSel: "", onlySprint: true, sprintKeys: new Map() };
+  dm: null, dmPeriod: "today", dmDay: "", dmDays: 30, dmPrio: "", poll: null, seq: 0, sprintSel: "", onlySprint: true, sprintKeys: new Map() };
 const PROG_CACHE_DAYS = 62;
 const TODAY_POLL_MS = 60 * 1000;
 
@@ -3569,11 +3602,11 @@ async function loadPrefs() {
     const { devPrefs, devPeriod, devDmPeriod, devOnlySprint } = await chrome.storage.local.get({ devPrefs: {}, devPeriod: "14", devDmPeriod: "today", devOnlySprint: true });
     DV.prefs = { ...PREFS_DEFAULT, ...devPrefs };
     DV.period = devPeriod;
-    DV.dmPeriod = devDmPeriod;
+    DV.dmPeriod = normPeriod(devDmPeriod) === "day" ? "today" : String(normPeriod(devDmPeriod));   // um dia escolhido não fica salvo
     DV.onlySprint = devOnlySprint !== false;
   } catch { /* sem storage */ }
   document.querySelectorAll("#pgPeriod button").forEach((b) => b.classList.toggle("on", b.dataset.period === DV.period));
-  document.querySelectorAll("#dmPeriod button").forEach((b) => b.classList.toggle("on", b.dataset.period === DV.dmPeriod));
+  paintDmPeriod();
 }
 const savePrefs = () => chrome.storage.local.set({ devPrefs: DV.prefs, devPeriod: DV.period, devDmPeriod: DV.dmPeriod, devOnlySprint: DV.onlySprint }).catch(() => {});
 
@@ -4335,7 +4368,7 @@ async function loadDemands({ force = false } = {}) {
   if (!DV.dm) $("demandsBox").innerHTML = `<p class="muted xs">Lendo suas demandas…</p>`;
   $("dmInfo").textContent = DV.dm ? "atualizando…" : "";
   try {
-    const dm = await send("MY_DEMANDS", { days: 30, force });
+    const dm = await send("MY_DEMANDS", { days: DV.dmDays, force });
     if (seq !== DV.seq) return;
     DV.dm = dm;
     chrome.storage.local.set({ devDemands: dm }).catch(() => {});
@@ -4364,16 +4397,63 @@ function prioPill(p) {
   return s;
 }
 
+/* ---------- Período das Demandas: Hoje · Ontem · 7/14/30 dias · Sprint · um dia escolhido ---------- */
+
+/** Sprint atual do espaço escolhido (em "Todos", a que começou primeiro). */
+function dmSprint() {
+  const act = (DV.sprints?.spaces || []).filter((sp) => !gspace.project || sp.project === gspace.project)
+    .flatMap((sp) => (sp.active || []).filter((a) => a.start).map((a) => ({ ...a, space: sp.label || sp.project })));
+  return act.sort((a, b) => String(a.start).localeCompare(String(b.start)))[0] || null;
+}
+function dmRange(today = DV.dm?.today || todayISO()) {
+  return periodRange(DV.dmPeriod, { today, day: DV.dmDay, sprint: dmSprint() });
+}
+function paintDmPeriod() {
+  document.querySelectorAll("#dmPeriod button").forEach((b) => b.classList.toggle("on", DV.dmPeriod !== "day" && b.dataset.period === String(DV.dmPeriod)));
+  const day = $("dmDay");
+  if (!day) return;
+  day.max = todayISO();
+  day.min = addDaysIso(todayISO(), -59);
+  day.value = DV.dmPeriod === "day" ? DV.dmDay : "";
+  day.classList.toggle("on", DV.dmPeriod === "day");
+}
+/** Troca o período; busca mais dias no Jira se o período passar do que já foi lido (até 60 dias). */
+async function setDmPeriod(p, day = "") {
+  DV.dmPeriod = p; DV.dmDay = day;
+  paintDmPeriod();
+  savePrefs();
+  if (p === "sprint" && !DV.sprints) {
+    $("dmInfo").textContent = "lendo a sprint…";
+    DV.sprints = await send("SPRINT_INFO", sprintScope()).catch(() => ({ spaces: [] }));
+  }
+  const r = dmRange(todayISO());
+  const need = Math.min(60, Math.max(30, Math.round((Date.parse(todayISO()) - Date.parse(r.from)) / DAY_MS) + 1));
+  if (need > DV.dmDays) { DV.dmDays = need; loadDemands({ force: true }); return; }
+  renderDemands();
+}
+
 function renderDemands() {
   const dm = DV.dm;
   if (!dm) return;
   const box = $("demandsBox");
   box.innerHTML = "";
-  const b = demandBoard(dm, { mode: DV.dmPeriod, project: gspace.project });
+  if (DV.dmPeriod === "sprint" && !DV.sprints) {   // período salvo em Sprint: lê a sprint e desenha de novo
+    if (!DV.dmSprintLoading) {
+      DV.dmSprintLoading = true;
+      send("SPRINT_INFO", sprintScope()).catch(() => ({ spaces: [] }))
+        .then((x) => { DV.sprints = DV.sprints || x; DV.dmSprintLoading = false; renderDemands(); });
+    }
+    box.innerHTML = `<p class="muted xs">Lendo a sprint…</p>`;
+    return;
+  }
+  const range = dmRange(dm.today);
+  const b = demandBoard(dm, { range, project: gspace.project });
+  const inP = range.single && range.now ? "hoje" : range.label;
   const deployName = deployLabel(gspace.project, { batch: DEF.spaces?.batch?.label, sustentacao: DEF.spaces?.sustentacao?.label });
   const feitoName = feitoLabel(gspace.project, { batch: DEF.spaces?.batch?.label, sustentacao: DEF.spaces?.sustentacao?.label });
   const label = (g) => (g.id === "deploy" ? deployName : g.id === "feito" ? feitoName : g.label);
-  $("dmInfo").textContent = `${DV.dmPeriod === "today" ? "colunas: o que entrou hoje" : `colunas: o que entrou desde ${brShort(b.since)}`} · atualizado ${since(dm.generatedAt)}`;
+  if (DV.dmPeriod === "sprint" && range.period !== "sprint") note(box, "warn", "Não achei a sprint atual deste espaço: mostrando hoje.");
+  $("dmInfo").textContent = `${range.single ? `${range.now ? "hoje" : range.title}: onde cada card estava no fim do dia` : `${range.label}: o que entrou em cada coluna`} · atualizado ${since(dm.generatedAt)}`;
 
   /* --- resumo por coluna (Em andamento, Impedido, Reaberto, Feito, Deploy, Validação, Finalizados) --- */
   const sum = el("div", "dm-sum seven");
@@ -4446,17 +4526,17 @@ function renderDemands() {
   let shown = pend.length + others.length;
   for (const [id] of SECTIONS) {
     const g = DEMAND_GROUPS.find((x) => x.id === id);
-    const rows = (id === "reopen" ? b.groups.reopen.filter((r) => r.enteredInPeriod) : b.groups[id]).filter(matchPrio);
+    const rows = b.groups[id].filter(matchPrio);
     if (!rows.length) continue;
     shown += rows.length;
-    const c = mCard(`${g.icon} ${label(g)}`, `${rows.length} · ${DV.dmPeriod === "today" ? "entraram hoje" : "no período"}`);
+    const c = mCard(`${g.icon} ${label(g)}`, `${rows.length} · ${id === "reopen" ? "reabertas" : "entraram"} ${inP}`);
     if (id !== "reopen") c.id = `dm-${id}`;
     else c.id = "dm-reopen";
     c.classList.add("dm-card", `k-${id}`);
     for (const r of rows.slice(0, 15)) {
       const i = r.issue;
       let sub;
-      if (id === "reopen") sub = `${r.lastReturn ? `reaberta ${dayShort(isoOfMs(r.lastReturn))}${r.lastReturnBy ? ` por ${r.lastReturnBy}` : ""}` : "reaberta"}${r.returns > 1 ? ` · ${r.returns}ª vez` : ""} · ${i.status.name}`;
+      if (id === "reopen") sub = `${r.lastReturn ? `reaberta ${dayShort(isoOfMs(r.lastReturn))}${r.lastReturnBy ? ` por ${r.lastReturnBy}` : ""}` : "em Reaberto"}${r.returnsInPeriod > 1 ? ` · ${r.returnsInPeriod}× ${inP}` : ""}${r.returns > 1 ? ` · ${r.returns}ª vez no total` : ""} · agora ${i.status.name}`;
       else if (id === "shipped") sub = `${est(i)}${r.returns ? ` · reaberta ${r.returns}×` : " · de primeira"}`;
       else sub = `${r.validated ? "✔ validado · " : ""}${i.status.name} desde ${dayShort(isoOfMs(r.since))}${i.assignee && !r.mine ? ` · ${i.assignee.name}` : ""}`;
       if (i.myToday) sub += ` · hoje ${fmtDur(i.myToday)}`;
@@ -4474,11 +4554,11 @@ function renderDemands() {
 
   if (!shown) {
     const e = el("div", "empty");
-    e.innerHTML = DV.dmPrio ? "<b>🔎</b>Nada com essa prioridade." : `<b>🗂</b>${DV.dmPeriod === "today" ? "Nada em seu nome e nenhuma das suas demandas mudou de coluna hoje." : "Nenhuma demanda sua neste período."}`;
+    e.innerHTML = DV.dmPrio ? "<b>🔎</b>Nada com essa prioridade." : `<b>🗂</b>${range.single && range.now ? "Nada em seu nome e nenhuma das suas demandas mudou de coluna hoje." : `Nenhuma demanda sua ${inP}.`}`;
     box.appendChild(e);
   }
   const parts = [];
-  if (b.worked) parts.push(`você apontou em ${b.worked} ${pl(b.worked, "demanda", "demandas")} ${DV.dmPeriod === "today" ? "hoje" : "no período"}`);
+  if (b.worked) parts.push(`você apontou em ${b.worked} ${pl(b.worked, "demanda", "demandas")} ${inP}`);
   if (b.groups.shipped.length) parts.push(`${b.firstPass} de ${b.groups.shipped.length} finalizadas sem reabrir`);
   if (parts.length) box.appendChild(el("p", "muted xs", `${parts.join(" · ")}.`));
   if (b.extra.prd.length) box.appendChild(el("p", "muted xs", `${b.extra.prd.length} ${pl(b.extra.prd.length, "demanda foi", "demandas foram")} para deploy de produção no período (fora dos cartões).`));
@@ -4514,11 +4594,12 @@ $("pgPeriod").addEventListener("click", (e) => {
 $("pgRefresh").addEventListener("click", () => loadProgress({ force: true }));
 $("dmPeriod").addEventListener("click", (e) => {
   const b = e.target.closest("button");
-  if (!b) return;
-  DV.dmPeriod = b.dataset.period;
-  document.querySelectorAll("#dmPeriod button").forEach((x) => x.classList.toggle("on", x === b));
-  savePrefs();
-  renderDemands();
+  if (b) setDmPeriod(b.dataset.period);
+});
+$("dmDay").addEventListener("change", (e) => {
+  const v = e.target.value;
+  if (!v) return setDmPeriod("today");
+  setDmPeriod(v === todayISO() ? "today" : "day", v === todayISO() ? "" : v);
 });
 $("pgSprint").addEventListener("change", () => { DV.sprintSel = $("pgSprint").value; loadProgress(); });
 $("dmRefresh").addEventListener("click", () => loadDemands({ force: true }));
@@ -5825,7 +5906,7 @@ function renderQaQueue() {
   const high = rows.filter((r) => isHighPrio(r.i.priority)).length;
   k.append(
     kpiTile(String(rows.length), "aguardando validação", gspace.project || "todos os espaços"),
-    kpiTile(String(recent.length), `chegaram ${QP_LABEL[QP.period]}`, older.length ? `${older.length} ${pl(older.length, "mais antiga", "mais antigas")}` : ""),
+    kpiTile(String(recent.length), `chegaram ${qpLabel()}`, older.length ? `${older.length} ${pl(older.length, "mais antiga", "mais antigas")}` : ""),
     kpiTile(String(high), "alta / crítica", "", high ? "warn" : "ok"),
     kpiTile(rows.length ? `${Math.max(...rows.map((r) => r.age))}d` : "—", "mais antiga", "dias úteis na fila", rows.some((r) => r.age >= 3) ? "warn" : ""),
   );
@@ -5845,8 +5926,8 @@ function renderQaQueue() {
     if (list.length > 40) c.appendChild(el("p", "muted xs", `+ ${list.length - 40}`));
     return c;
   };
-  if (recent.length) box.appendChild(section(`Chegaram ${QP_LABEL[QP.period]}`, "prioridade, depois tempo esperando", recent));
-  if (older.length) box.appendChild(section(QP.period === "yesterday" ? "Fora de ontem" : "Esperando há mais tempo", `fora do período · ${older.length}`, older));
+  if (recent.length) box.appendChild(section(`Chegaram ${qpLabel()}`, "prioridade, depois tempo esperando", recent));
+  if (older.length) box.appendChild(section(qpR().single && !qpR().now ? `Fora de ${qpR().title.toLowerCase()}` : "Esperando há mais tempo", `fora do período · ${older.length}`, older));
   if (!rows.length) box.appendChild(el("div", "empty", "Nada esperando validação 🎉"));
   if (d.truncated) note(box, "warn", "Mais de 200 itens: mostrando os primeiros.");
 }
@@ -6316,8 +6397,13 @@ chrome.runtime.onMessage.addListener((msg) => {
   const qaSpaces = [...new Set([defaults?.spaces?.batch?.label || "MEED", defaults?.spaces?.sustentacao?.label || "SUS"])];
   if (!qaSpaces.includes(gspace.project)) gspace.project = "";
   renderGlobalSpace(qaSpaces);
-  document.querySelectorAll("#qaPeriod button").forEach((b) => b.classList.toggle("on", b.dataset.p === QP.period));
+  paintQaPeriod();
+  if (QP.period === "sprint") setQaPeriod("sprint");   // salvo em Sprint: lê as datas da sprint atual
   $("qaPeriod").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setQaPeriod(b.dataset.p); });
+  $("qaDay").addEventListener("change", (e) => {
+    const v = e.target.value;
+    setQaPeriod(!v || v === todayISO() ? "today" : "day", !v || v === todayISO() ? "" : v);
+  });
   $("spaceBar").classList.toggle("hidden", !["panel", "qaq", "day", "team"].includes(state.mode));
   $("qaPeriodBar").classList.toggle("hidden", !["panel", "qaq", "day"].includes(state.mode));
 

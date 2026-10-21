@@ -6,6 +6,7 @@
  *     days: { "YYYY-MM-DD": [{ key, summary, status, statusCategory, parentKey, start, minutes }] } }
  */
 import { addDaysIso, isWeekendIso, daysOf, startOfIso, DAY_MS } from "./dates.js";
+import { periodRange } from "./period.js";
 
 export const totalOf = (prog, d) => (prog.days[d] || []).reduce((s, e) => s + e.minutes, 0);
 
@@ -175,57 +176,70 @@ export function deployLabel(project, labels = {}) {
 }
 
 /**
- * @param dm    resposta do MY_DEMANDS
- * @param mode  "today" (o que mudou hoje) ou número de dias
- *
- * Devolve:
- *   pending — em seu nome agora (em andamento, impedido, reaberto, a fazer), com a demanda em que
- *             você está atuando primeiro (`acting`); não depende do período;
- *   groups  — Feito, Deploy, Validação e Finalizados que ENTRARAM nessa coluna no período
- *             (Hoje = só o que entrou hoje), além de Em andamento/Impedido/Reaberto para os totais.
+ * Quadro das suas demandas num período (Hoje, Ontem, um dia, 7/14/30 dias, Sprint).
+ * Cada card conta na coluna em que estava NO FIM do período (não na de agora), então um dia
+ * passado mostra aquele dia de verdade. Reaberto conta as reaberturas que aconteceram no período.
+ * Em andamento e Impedido: o que você mexeu no período; com o período chegando até hoje, também
+ * o que está em seu nome agora.
+ * @param range  periodRange() de lib/period.js; sem ele, usa `mode` ("today", "7"…) como antes.
  */
-export function demandBoard(dm, { mode = "today", project = "", now = Date.now() } = {}) {
+export function demandBoard(dm, { mode = "today", range = null, project = "", now = Date.now() } = {}) {
   const me = dm.me.accountId;
   const kindOf = kindResolver(dm);
   const today = dm.today;
-  const sinceIso = mode === "today" ? today : addDaysIso(today, -(Number(mode) - 1));
-  const sinceMs = startOfIso(sinceIso);
+  const r0 = range || periodRange(mode, { today, nowMs: now });
+  const { fromMs, toMs } = r0;
+  const fromIso = r0.from, toIso = r0.to;
+  const isNow = r0.now;
   const groups = Object.fromEntries(DEMAND_GROUPS.map((g) => [g.id, []]));
   const extra = { todo: [], prd: [], idle: [] };
   const pending = [];
 
   for (const i of dm.issues) {
     if (project && i.project !== project) continue;
-    const kind = kindOf(i.status.id, i.project, i.status.name);
-    const last = i.transitions[i.transitions.length - 1];
+    if (i.created && i.created > toMs) continue;                 // criada depois do período
+    const upTo = i.transitions.filter((t) => t.at <= toMs);
+    const last = upTo[upTo.length - 1];
+    // coluna no fim do período: a da última mudança até lá; sem mudança, a de origem da primeira (ou a atual)
+    const first = i.transitions[0];
+    let statusAt = last ? { id: last.to, name: last.toName }
+      : first ? { id: first.from, name: first.fromName } : { id: i.status.id, name: i.status.name };
+    if (String(statusAt.id) === String(i.status.id)) statusAt = { id: i.status.id, name: i.status.name };   // mesmo status de agora: o nome atual
+    const kind = kindOf(statusAt.id, i.project, dm.statuses?.[statusAt.id]?.name || statusAt.name);
     const since = last ? last.at : i.created || now;
     const mineNow = i.assignee?.id === me;
-    const workedMin = Object.entries(i.myByDay || {}).filter(([d]) => d >= sinceIso && d <= today).reduce((sum, [, m]) => sum + m, 0);
-    const movedByMe = i.transitions.some((t) => t.by === me && t.at >= sinceMs);
-    const active = since >= sinceMs || workedMin > 0 || movedByMe;
+    const workedMin = Object.entries(i.myByDay || {}).filter(([d]) => d >= fromIso && d <= toIso).reduce((sum, [, m]) => sum + m, 0);
+    const movedByMe = i.transitions.some((t) => t.by === me && t.at >= fromMs && t.at <= toMs);
+    const enteredInPeriod = since >= fromMs && since <= toMs;
+    const active = enteredInPeriod || workedMin > 0 || movedByMe;
     const touchedEver = mineNow || i.myMinutes > 0 || i.transitions.some((t) => t.by === me);
 
     // Reaberturas: cada entrada em "Reaberto" (ou volta de feito/deploy/validação para desenvolvimento)
-    let returns = 0, lastReturn = null, lastReturnBy = "";
-    for (const t of i.transitions) {
-      const a = kindOf(t.from, i.project, t.fromName), b = kindOf(t.to, i.project, t.toName);
+    let returns = 0, returnsInPeriod = 0, lastReturn = null, lastReturnBy = "";
+    for (const t of upTo) {
+      const a = kindOf(t.from, i.project, dm.statuses?.[t.from]?.name || t.fromName), b = kindOf(t.to, i.project, dm.statuses?.[t.to]?.name || t.toName);
       const reopened = b === "reopen" ? a !== "reopen"
         : ["qa", "validated", "deploy", "prd", "feito", "done"].includes(a) && ["other", "todo"].includes(b);
-      if (reopened) { returns++; lastReturn = t.at; lastReturnBy = t.byName; }
+      if (!reopened) continue;
+      returns++;
+      if (t.at >= fromMs) { returnsInPeriod++; lastReturn = t.at; lastReturnBy = t.byName; }
     }
-    const row = { issue: i, kind, since, ageMs: now - since, returns, lastReturn, lastReturnBy, mine: mineNow, workedMin,
-      today: i.myToday || 0, enteredInPeriod: since >= sinceMs };
+    const row = { issue: i, kind, since, ageMs: toMs - since, returns, returnsInPeriod, lastReturn, lastReturnBy, mine: mineNow, workedMin,
+      today: isNow ? (i.myToday || 0) : 0, enteredInPeriod };
 
     if (!touchedEver) continue;
-    if (mineNow && ["other", "blocked", "reopen", "todo"].includes(kind)) pending.push(row);
+    // "Em seu nome agora" só faz sentido quando o período chega até hoje
+    if (isNow && mineNow && ["other", "blocked", "reopen", "todo"].includes(kind)) pending.push(row);
+    // Reaberto: o que foi reaberto no período, esteja onde estiver agora
+    if (returnsInPeriod || (kind === "reopen" && active)) groups.reopen.push(row);
+    if (kind === "reopen") continue;
     if (kind === "prd") { if (active) extra.prd.push(row); continue; }
-    if (kind === "todo") { if (mineNow) extra.todo.push(row); continue; }
-    if (kind === "other") { if (active || mineNow) groups.doing.push(row); continue; }
-    if (kind === "blocked") { if (active || mineNow) groups.blocked.push(row); continue; }
-    if (kind === "reopen") { if (active || mineNow) groups.reopen.push(row); continue; }
+    if (kind === "todo") { if (isNow && mineNow) extra.todo.push(row); continue; }
+    if (kind === "other") { if (active || (isNow && mineNow)) groups.doing.push(row); continue; }
+    if (kind === "blocked") { if (active || (isNow && mineNow)) groups.blocked.push(row); continue; }
     // Feito, Deploy, Validação e Finalizados: só o que entrou na coluna no período
-    if (!row.enteredInPeriod) {
-      if (mineNow && kind !== "done") extra.idle.push(row);
+    if (!enteredInPeriod) {
+      if (isNow && mineNow && kind !== "done") extra.idle.push(row);
       continue;
     }
     if (kind === "done") { groups.shipped.push(row); continue; }
@@ -258,10 +272,10 @@ export function demandBoard(dm, { mode = "today", project = "", now = Date.now()
     prioCount.set(k, cur);
   }
   return {
-    since: sinceIso, groups, extra, pending, acting,
+    since: fromIso, to: toIso, range: r0, groups, extra, pending, acting,
     priorities: [...prioCount.values()].sort((a, b) => a.rank - b.rank),
     firstPass: groups.shipped.filter((r) => !r.returns).length,
     worked: dm.issues.filter((i) => (!project || i.project === project)
-      && Object.entries(i.myByDay || {}).some(([d, m]) => d >= sinceIso && m > 0)).length,
+      && Object.entries(i.myByDay || {}).some(([d, m]) => d >= fromIso && d <= toIso && m > 0)).length,
   };
 }
