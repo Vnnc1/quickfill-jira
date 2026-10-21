@@ -53,7 +53,7 @@ export function periodRange(period, { today, day = "", sprint = null, nowMs = Da
     const end = sprint.end ? String(sprint.end).slice(0, 10) : today;
     to = end < today ? end : today;
     if (from > to) from = to;
-    label = `na ${sprint.name || "sprint"} (desde ${brShort(from)})`; title = sprint.name || "Sprint";
+    label = `na ${sprint.name || "sprint"} (${to === today ? `desde ${brShort(from)}` : `de ${brShort(from)} a ${brShort(to)}`})`; title = sprint.name || "Sprint";
   } else if (typeof p === "number") { from = addDaysIso(today, -(p - 1)); to = today; label = `em ${p} dias`; title = `${p} dias`; }
   else { from = to = today; label = "hoje"; title = "Hoje"; }
   const now = to === today;

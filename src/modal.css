@@ -1614,3 +1614,8 @@ html.float .top-actions .ic { width: 28px; height: 28px; }
 .inp.dm-day.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 #qaPeriodBar { flex-wrap: wrap; }
 #scPeriodBar { flex-wrap: wrap; }
+/* Demandas: Sprint (atual ou anterior) separada do período, e busca */
+.dm-filters { flex-wrap: wrap; }
+.inp.dm-sprint { flex: 0 1 240px; min-width: 150px; }
+.inp.dm-sprint.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.inp.dm-search { flex: 1 1 160px; min-width: 140px; }

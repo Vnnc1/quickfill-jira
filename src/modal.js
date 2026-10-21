@@ -3593,22 +3593,25 @@ const PREF_GROUPS = [
   ]],
 ];
 const DV = { prog: null, date: todayISO(), team: null, teamDate: null, prefs: { ...PREFS_DEFAULT }, period: "14", sprints: null,
-  dm: null, dmPeriod: "today", dmDay: "", dmDays: 30, dmPrio: "", poll: null, seq: 0, sprintSel: "", onlySprint: true, sprintKeys: new Map() };
+  dm: null, dmPeriod: "today", dmDay: "", dmDays: 30, dmPrio: "", dmSprint: "", dmQ: "", dmSprintKeys: null, poll: null, seq: 0, sprintSel: "", onlySprint: true, sprintKeys: new Map() };
 const PROG_CACHE_DAYS = 62;
 const TODAY_POLL_MS = 60 * 1000;
 
 async function loadPrefs() {
   try {
-    const { devPrefs, devPeriod, devDmPeriod, devOnlySprint } = await chrome.storage.local.get({ devPrefs: {}, devPeriod: "14", devDmPeriod: "today", devOnlySprint: true });
+    const { devPrefs, devPeriod, devDmPeriod, devOnlySprint, devDmSprint } = await chrome.storage.local.get({ devPrefs: {}, devPeriod: "14", devDmPeriod: "today", devOnlySprint: true, devDmSprint: "" });
+    DV.dmSprint = devDmSprint || "";
     DV.prefs = { ...PREFS_DEFAULT, ...devPrefs };
     DV.period = devPeriod;
     DV.dmPeriod = normPeriod(devDmPeriod) === "day" ? "today" : String(normPeriod(devDmPeriod));   // um dia escolhido não fica salvo
+    if (DV.dmPeriod === "sprint" && !DV.dmSprint) DV.dmSprint = "current";   // versão anterior: Sprint era um botão do período
     DV.onlySprint = devOnlySprint !== false;
   } catch { /* sem storage */ }
   document.querySelectorAll("#pgPeriod button").forEach((b) => b.classList.toggle("on", b.dataset.period === DV.period));
   paintDmPeriod();
 }
-const savePrefs = () => chrome.storage.local.set({ devPrefs: DV.prefs, devPeriod: DV.period, devDmPeriod: DV.dmPeriod, devOnlySprint: DV.onlySprint }).catch(() => {});
+const savePrefs = () => chrome.storage.local.set({ devPrefs: DV.prefs, devPeriod: DV.period, devDmPeriod: DV.dmPeriod, devOnlySprint: DV.onlySprint,
+  devDmSprint: DV.dmSprint === "current" || !DV.dmSprint ? DV.dmSprint : "" }).catch(() => {});   // sprint anterior não fica salva
 
 /** Junta dias buscados ao que já está carregado. */
 function mergeProg(fresh) {
@@ -4397,16 +4400,71 @@ function prioPill(p) {
   return s;
 }
 
-/* ---------- Período das Demandas: Hoje · Ontem · 7/14/30 dias · Sprint · um dia escolhido ---------- */
+/* ---------- Período das Demandas: Hoje · Ontem · 7/14/30 dias · um dia escolhido ---------- */
+/* ---------- e, separado, a Sprint (a atual ou uma anterior) e a busca                  ---------- */
 
-/** Sprint atual do espaço escolhido (em "Todos", a que começou primeiro). */
+/**
+ * Sprint escolhida no seletor: "" = todas; "current" = as sprints atuais do espaço (juntas em "Todos");
+ * um id = aquela sprint (atual ou anterior). Devolve { id, name, start, end, parts } ou null.
+ */
 function dmSprint() {
-  const act = (DV.sprints?.spaces || []).filter((sp) => !gspace.project || sp.project === gspace.project)
-    .flatMap((sp) => (sp.active || []).filter((a) => a.start).map((a) => ({ ...a, space: sp.label || sp.project })));
-  return act.sort((a, b) => String(a.start).localeCompare(String(b.start)))[0] || null;
+  if (!DV.dmSprint) return null;
+  const opts = sprintOptions();
+  if (DV.dmSprint === "current") {
+    const cur = opts.filter((o) => o.current);
+    if (!cur.length) return null;
+    if (cur.length === 1) return { ...cur[0], parts: [cur[0]] };
+    return { id: "current", name: "Sprints atuais", parts: cur, start: cur.map((o) => o.start).sort()[0],
+      end: cur.map((o) => o.end || todayISO()).sort().at(-1) };
+  }
+  const o = opts.find((x) => String(x.id) === String(DV.dmSprint));
+  return o ? { ...o, parts: [o] } : null;
 }
+/** Com uma sprint escolhida e o período "sprint inteira", o intervalo é o da sprint. */
 function dmRange(today = DV.dm?.today || todayISO()) {
   return periodRange(DV.dmPeriod, { today, day: DV.dmDay, sprint: dmSprint() });
+}
+/** Chaves das demandas da sprint escolhida (e as tarefas pai delas), lidas uma vez por sprint. */
+async function loadDmSprintKeys() {
+  const sp = dmSprint();
+  if (!sp) { DV.dmSprintKeys = null; return; }
+  const keys = new Set();
+  for (const p of sp.parts) {
+    if (!DV.sprintKeys.has(String(p.id))) {
+      const k = await send("SPRINT_KEYS", { sprintId: p.id }).catch(() => null);
+      if (k) DV.sprintKeys.set(String(p.id), new Set(k.keys));
+    }
+    for (const k of DV.sprintKeys.get(String(p.id)) || []) keys.add(k);
+  }
+  DV.dmSprintKeys = keys;
+}
+function paintDmSprint() {
+  const sel = $("dmSprint");
+  if (!sel) return;
+  const opts = sprintOptions();
+  const many = new Set(opts.map((o) => o.project)).size > 1;
+  sel.innerHTML = "";
+  sel.append(new Option("Todas as sprints", ""));
+  if (opts.some((o) => o.current)) sel.append(new Option(opts.filter((o) => o.current).length > 1 ? "Sprints atuais" : "Sprint atual", "current"));
+  for (const o of opts) {
+    const when = o.start ? ` · ${brShort(o.start)} a ${brShort(o.end || todayISO())}` : "";
+    sel.append(new Option(`${many ? `${o.space} · ` : ""}${o.name}${o.current ? " (atual)" : ""}${when}`, String(o.id)));
+  }
+  if (DV.dmSprint && ![...sel.options].some((x) => x.value === String(DV.dmSprint))) DV.dmSprint = "";
+  sel.value = String(DV.dmSprint);
+  sel.classList.toggle("on", !!DV.dmSprint);
+}
+async function setDmSprint(v) {
+  DV.dmSprint = v;
+  // escolher uma sprint mostra a sprint inteira; os botões de período continuam valendo dentro dela
+  if (v) { DV.dmPeriod = "sprint"; DV.dmDay = ""; } else if (DV.dmPeriod === "sprint") DV.dmPeriod = "today";
+  paintDmPeriod(); paintDmSprint(); savePrefs();
+  $("dmInfo").textContent = v ? "lendo a sprint…" : "";
+  await loadDmSprintKeys();
+  const r = dmRange(todayISO());
+  const need = Math.min(60, Math.max(30, Math.round((Date.parse(todayISO()) - Date.parse(r.from)) / DAY_MS) + 1));
+  if (need > DV.dmDays) { DV.dmDays = need; loadDemands({ force: true }); return; }
+  renderDemands();
 }
 function paintDmPeriod() {
   document.querySelectorAll("#dmPeriod button").forEach((b) => b.classList.toggle("on", DV.dmPeriod !== "day" && b.dataset.period === String(DV.dmPeriod)));
@@ -4422,10 +4480,6 @@ async function setDmPeriod(p, day = "") {
   DV.dmPeriod = p; DV.dmDay = day;
   paintDmPeriod();
   savePrefs();
-  if (p === "sprint" && !DV.sprints) {
-    $("dmInfo").textContent = "lendo a sprint…";
-    DV.sprints = await send("SPRINT_INFO", sprintScope()).catch(() => ({ spaces: [] }));
-  }
   const r = dmRange(todayISO());
   const need = Math.min(60, Math.max(30, Math.round((Date.parse(todayISO()) - Date.parse(r.from)) / DAY_MS) + 1));
   if (need > DV.dmDays) { DV.dmDays = need; loadDemands({ force: true }); return; }
@@ -4437,23 +4491,30 @@ function renderDemands() {
   if (!dm) return;
   const box = $("demandsBox");
   box.innerHTML = "";
-  if (DV.dmPeriod === "sprint" && !DV.sprints) {   // período salvo em Sprint: lê a sprint e desenha de novo
+  // Sprints do seletor: lidas uma vez; com uma sprint escolhida, espera as chaves dela
+  if (!DV.sprints || (DV.dmSprint && !DV.dmSprintKeys)) {
     if (!DV.dmSprintLoading) {
       DV.dmSprintLoading = true;
-      send("SPRINT_INFO", sprintScope()).catch(() => ({ spaces: [] }))
-        .then((x) => { DV.sprints = DV.sprints || x; DV.dmSprintLoading = false; renderDemands(); });
+      (DV.sprints ? Promise.resolve(DV.sprints) : send("SPRINT_INFO", sprintScope()).catch(() => ({ spaces: [] })))
+        .then(async (x) => { DV.sprints = DV.sprints || x; paintDmSprint(); await loadDmSprintKeys(); })
+        .finally(() => { DV.dmSprintLoading = false; if (!DV.dmSprint || DV.dmSprintKeys) renderDemands(); });
     }
-    box.innerHTML = `<p class="muted xs">Lendo a sprint…</p>`;
-    return;
+    if (DV.dmSprint) { box.innerHTML = `<p class="muted xs">Lendo a sprint…</p>`; return; }
   }
   const range = dmRange(dm.today);
-  const b = demandBoard(dm, { range, project: gspace.project });
+  const sprint = dmSprint();
+  const q = normName(DV.dmQ.trim());
+  const inSprint = (i) => !sprint || !DV.dmSprintKeys || DV.dmSprintKeys.has(i.key) || (i.parentKey && DV.dmSprintKeys.has(i.parentKey));
+  const found = (i) => !q || normName(`${i.key} ${i.summary || ""} ${i.parentKey || ""} ${i.parentSummary || ""}`).includes(q);
+  const view = sprint || q ? { ...dm, issues: dm.issues.filter((i) => inSprint(i) && found(i)) } : dm;
+  const b = demandBoard(view, { range, project: gspace.project });
   const inP = range.single && range.now ? "hoje" : range.label;
   const deployName = deployLabel(gspace.project, { batch: DEF.spaces?.batch?.label, sustentacao: DEF.spaces?.sustentacao?.label });
   const feitoName = feitoLabel(gspace.project, { batch: DEF.spaces?.batch?.label, sustentacao: DEF.spaces?.sustentacao?.label });
   const label = (g) => (g.id === "deploy" ? deployName : g.id === "feito" ? feitoName : g.label);
-  if (DV.dmPeriod === "sprint" && range.period !== "sprint") note(box, "warn", "Não achei a sprint atual deste espaço: mostrando hoje.");
-  $("dmInfo").textContent = `${range.single ? `${range.now ? "hoje" : range.title}: onde cada card estava no fim do dia` : `${range.label}: o que entrou em cada coluna`} · atualizado ${since(dm.generatedAt)}`;
+  if (DV.dmSprint && !sprint) note(box, "warn", "Não achei essa sprint neste espaço: mostrando todas.");
+  const scope = [sprint && DV.dmPeriod !== "sprint" ? `só da ${sprint.name}` : "", q ? `com “${DV.dmQ.trim()}”: ${view.issues.filter((i) => !gspace.project || i.project === gspace.project).length} ${pl(view.issues.length, "demanda", "demandas")}` : ""].filter(Boolean).join(" · ");
+  $("dmInfo").textContent = `${range.single ? `${range.now ? "hoje" : range.title}: onde cada card estava no fim do dia` : `${range.label}: o que entrou em cada coluna`}${scope ? ` · ${scope}` : ""} · atualizado ${since(dm.generatedAt)}`;
 
   /* --- resumo por coluna (Em andamento, Impedido, Reaberto, Feito, Deploy, Validação, Finalizados) --- */
   const sum = el("div", "dm-sum seven");
@@ -4554,8 +4615,9 @@ function renderDemands() {
 
   if (!shown) {
     const e = el("div", "empty");
-    e.innerHTML = DV.dmPrio ? "<b>🔎</b>Nada com essa prioridade." : `<b>🗂</b>${range.single && range.now ? "Nada em seu nome e nenhuma das suas demandas mudou de coluna hoje." : `Nenhuma demanda sua ${inP}.`}`;
+    e.innerHTML = q ? "<b>🔎</b>" : DV.dmPrio ? "<b>🔎</b>Nada com essa prioridade." : `<b>🗂</b>${range.single && range.now ? "Nada em seu nome e nenhuma das suas demandas mudou de coluna hoje." : `Nenhuma demanda sua ${inP}.`}`;
     box.appendChild(e);
+    if (q) e.append(`Nenhuma demanda sua com “${DV.dmQ.trim()}” ${inP}.`);
   }
   const parts = [];
   if (b.worked) parts.push(`você apontou em ${b.worked} ${pl(b.worked, "demanda", "demandas")} ${inP}`);
@@ -4595,6 +4657,12 @@ $("pgRefresh").addEventListener("click", () => loadProgress({ force: true }));
 $("dmPeriod").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (b) setDmPeriod(b.dataset.period);
+});
+$("dmSprint").addEventListener("change", (e) => setDmSprint(e.target.value));
+let dmSearchTimer = null;
+$("dmSearch").addEventListener("input", (e) => {
+  clearTimeout(dmSearchTimer);
+  dmSearchTimer = setTimeout(() => { DV.dmQ = e.target.value; renderDemands(); }, 150);
 });
 $("dmDay").addEventListener("change", (e) => {
   const v = e.target.value;

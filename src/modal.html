@@ -189,11 +189,16 @@
             <button data-period="7">7 dias</button>
             <button data-period="14">14 dias</button>
             <button data-period="30">30 dias</button>
-            <button data-period="sprint" title="Desde o início da sprint atual">Sprint</button>
           </div>
           <input type="date" id="dmDay" class="inp sm dm-day" title="Ver um dia específico" aria-label="Escolher um dia" />
           <span class="muted xs grow" id="dmInfo"></span>
           <button class="ic bordered" id="dmRefresh" title="Atualizar">↻</button>
+        </div>
+        <div class="m-tools dm-filters">
+          <select id="dmSprint" class="inp sm dm-sprint" aria-label="Sprint" title="Só as demandas de uma sprint (a atual ou uma anterior)">
+            <option value="">Todas as sprints</option>
+          </select>
+          <input type="search" id="dmSearch" class="inp sm dm-search" placeholder="Buscar demanda: chave ou título" aria-label="Buscar demanda" autocomplete="off" spellcheck="false" />
         </div>
         <div id="demandsBox"><p class="muted xs">Carregando suas demandas…</p></div>
       </section>
