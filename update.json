@@ -1,43 +1,43 @@
 {
-  "version": "4.9.0",
+  "version": "4.9.1",
   "private": false,
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "installCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/quickfill.ps1 | iex\"",
   "guide": "https://github.com/Vnnc1/quickfill-jira#readme",
   "date": "2026-10-21",
-  "notes": "Espaço UX: abas Quadro, Entregas e Demanda, com busca; Olho do Figma nas demandas: modal com Visualizar (telas) e Protótipo navegável; O link vem do painel Designs, descrição, comentários e demandas ligadas",
+  "notes": "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão; DESIGN cria no espaço UX",
   "packages": {
     "qa": {
-      "version": "4.8.2",
+      "version": "4.8.3",
       "folder": "jira-quickfill-qa",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-qa.zip",
-      "date": "2026-10-20",
-      "notes": "SCRUM: ao lado do Período, escolha uma sprint anterior (até as 12 últimas) para ver Sprint, Pessoas e Riscos com as demandas dela. Sprint atual volta ao padrão.",
-      "hash": ""
+      "date": "2026-10-21",
+      "notes": "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão; DESIGN cria no espaço UX",
+      "hash": "5eddee824a2c36eb"
     },
     "dev": {
-      "version": "4.8.2",
+      "version": "4.8.3",
       "folder": "jira-quickfill-dev",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-dev.zip",
-      "date": "2026-10-20",
-      "notes": "SCRUM: ao lado do Período, escolha uma sprint anterior (até as 12 últimas) para ver Sprint, Pessoas e Riscos com as demandas dela. Sprint atual volta ao padrão.",
-      "hash": ""
+      "date": "2026-10-21",
+      "notes": "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão; DESIGN cria no espaço UX",
+      "hash": "d69fa48b2cda1253"
     },
     "scrum": {
-      "version": "4.8.2",
+      "version": "4.8.3",
       "folder": "jira-quickfill-scrum",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-scrum.zip",
-      "date": "2026-10-20",
-      "notes": "SCRUM: ao lado do Período, escolha uma sprint anterior (até as 12 últimas) para ver Sprint, Pessoas e Riscos com as demandas dela. Sprint atual volta ao padrão.",
-      "hash": ""
+      "date": "2026-10-21",
+      "notes": "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão; DESIGN cria no espaço UX",
+      "hash": "035232134a6b44dd"
     },
     "design": {
-      "version": "4.9.0",
+      "version": "4.9.1",
       "folder": "jira-quickfill-design",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-design.zip",
       "date": "2026-10-21",
-      "notes": "Espaço UX: abas Quadro, Entregas e Demanda, com busca; Olho do Figma nas demandas: modal com Visualizar (telas) e Protótipo navegável; O link vem do painel Designs, descrição, comentários e demandas ligadas",
-      "hash": "90ca7479eca5f4c1"
+      "notes": "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão; DESIGN cria no espaço UX",
+      "hash": "e2d0c1a39c683cf7"
     }
   }
 }

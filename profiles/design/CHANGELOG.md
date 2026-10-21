@@ -2,6 +2,11 @@
 
 Cada perfil tem a sua versão. Esta lista é preenchida pelo `npm run release`.
 
+## 4.9.1 (2026-10-21)
+
+- Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão
+- DESIGN cria no espaço UX
+
 ## 4.9.0 (2026-10-21)
 
 - Espaço UX: abas Quadro, Entregas e Demanda, com busca
