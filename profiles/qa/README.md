@@ -45,7 +45,7 @@ Quatro abas e uma barra de ação fixa no rodapé:
 - **Meu dia** — apontamentos do dia contra a meta, com histórico.
 - **Pílula no topo** — quanto você já apontou hoje contra a meta; clique para abrir o Meu dia.
 
-### Equipe (ao vivo, a cada 5 s)
+### Equipe (ao vivo, a cada 30 s)
 
 O topo mostra um resumo do dia (horas da equipe e quantos bateram a meta, com clique para filtrar). Há duas visões: **Cartões**, com um anel de progresso no avatar e o último apontamento de cada pessoa, e **Linha do tempo**, com todos na mesma régua de horário. Abaixo ficam os **Últimos apontamentos**, ao vivo.
 
@@ -67,12 +67,14 @@ padrão: MEED e SUS), para o dia escolhido:
 - Ordene por **menos horas** (padrão — quem está mais longe da meta primeiro), **mais horas**
   ou **nome**, e filtre pelo nome.
 
-**Atualização automática:** com o dia de hoje aberto, a aba consulta o Jira a cada 5 s
+**Atualização automática:** com o dia de hoje aberto, a aba consulta o Jira a cada 30 s
 (indicador *● ao vivo · atualizado há Xs*). Quem mudou desde a última leitura pisca e mostra
 a diferença (*+1h 30m agora*). Para não pesar no Jira:
 
-- a cada 5 s vai **uma** busca pelas issues alteradas nos últimos 2 min, e só os apontamentos
+- a cada 30 s vai **uma** busca pelas issues alteradas desde a última leitura, e só os apontamentos
   dessas issues são relidos; a carga completa acontece ao abrir, ao trocar de dia e a cada 3 min;
+- se o Jira pedir uma pausa (limite de uso), a extensão espera o tempo pedido e a atualização
+  automática espera mais a cada vez (1, 2 e até 5 min), voltando ao normal na primeira resposta boa;
 - nunca há duas consultas ao mesmo tempo, e ela **para** quando você sai da aba, minimiza o
   Chrome ou clica em ❚❚. Dias anteriores não ficam consultando (são histórico).
 

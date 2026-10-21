@@ -72,7 +72,7 @@ QuickFill QA, a causa (etiqueta `retorno-…`) aparece em *Voltaram* e no bloco 
 
 ## Equipe
 
-A mesma aba do QA e do DEV: ao vivo a cada 5 s, horas de cada pessoa contra a meta e o teto.
+A mesma aba do QA e do DEV: ao vivo a cada 30 s, horas de cada pessoa contra a meta e o teto.
 
 ## Opções
 

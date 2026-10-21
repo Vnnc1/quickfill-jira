@@ -1972,10 +1972,14 @@ $("panelSearch").addEventListener("input", () => {
    Equipe: quem apontou, quanto, contra a meta e o teto de cada pessoa
    ===================================================================== */
 
-const TEAM_POLL_MS = 5000;
+const TEAM_POLL_MS = 30 * 1000;
+/** Quando o Jira pede pausa (429), a atualização automática espera mais a cada vez: 1, 2 e até 5 min. */
+const RATE_BACKOFF_MAX_MS = 5 * 60 * 1000;
+const isRateLimited = (msg) => /\bJira 429\b/.test(String(msg || ""));
+const nextBackoff = (cur) => Math.min(RATE_BACKOFF_MAX_MS, cur ? cur * 2 : 60 * 1000);
 const team = {
   data: null, date: todayISO(), open: new Set(), sort: "low", q: "", filter: "",
-  paused: false, timer: null, ticker: null, inflight: false, showHidden: false,
+  paused: false, timer: null, ticker: null, inflight: false, showHidden: false, backoff: 0, backoffUntil: 0,
   lastOk: 0, error: null, pendingRender: false, scope: "cfg",
   view: (() => { try { return localStorage.getItem("qf.teamView") || "cards"; } catch { return "cards"; } })(),
 };
@@ -1995,6 +1999,7 @@ function stopTeamPolling() {
 function pollTeam() {
   // Só atualiza sozinho para hoje, com a aba visível e sem pausa.
   if (state.mode !== "team" || team.paused || team.date !== todayISO() || document.visibilityState !== "visible") return;
+  if (Date.now() < team.backoffUntil) return;   // o Jira pediu pausa: espera antes de consultar de novo
   loadTeam({ silent: true });
 }
 
@@ -2012,9 +2017,11 @@ async function loadTeam({ force = false, silent = false } = {}) {
     team.data = rep;
     team.error = null;
     team.lastOk = Date.now();
+    team.backoff = 0; team.backoffUntil = 0;
     renderTeam();
   } catch (e) {
     team.error = e.message;
+    if (isRateLimited(e.message)) { team.backoff = nextBackoff(team.backoff); team.backoffUntil = Date.now() + team.backoff; }
     if (!team.data || team.data.date !== date) { $("teamBox").innerHTML = ""; note($("teamBox"), "err", e.message); }
   } finally {
     team.inflight = false;
@@ -2026,11 +2033,14 @@ function updateTeamLive() {
   const live = team.date === todayISO();
   const el = $("teamLive");
   el.className = "live" + (!live ? " past" : team.paused ? " paused" : team.error ? " err" : "");
-  el.querySelector("b").textContent = !live ? "histórico" : team.paused ? "pausado" : team.error ? "falha ao atualizar" : "ao vivo";
+  const wait = Math.ceil((team.backoffUntil - Date.now()) / 1000);
+  el.querySelector("b").textContent = !live ? "histórico" : team.paused ? "pausado"
+    : wait > 0 ? `Jira pediu uma pausa · volta em ${wait >= 60 ? `${Math.ceil(wait / 60)} min` : `${wait}s`}`
+    : team.error ? "falha ao atualizar" : "ao vivo";
   const ago = team.lastOk ? Math.max(0, Math.round((Date.now() - team.lastOk) / 1000)) : null;
   $("teamAgo").textContent = ago == null ? "" : live ? ` · atualizado há ${ago}s` : "";
   $("teamPause").textContent = team.paused ? "▶" : "❚❚";
-  $("teamPause").title = team.paused ? "Retomar atualização a cada 5 s" : "Pausar atualização automática";
+  $("teamPause").title = team.paused ? "Retomar atualização a cada 30 s" : "Pausar atualização automática";
   $("teamPause").disabled = !live;
 }
 
@@ -3683,11 +3693,15 @@ function startTodayPolling() {
   const every = Math.max(1, Number(DV.prefs.refreshMin) || 1) * 60 * 1000;
   DV.poll = setInterval(async () => {
     if (!DV.prefs.autoRefresh || DV.date !== todayISO() || document.hidden) return;
+    if (Date.now() < (DV.backoffUntil || 0)) return;   // o Jira pediu pausa
     try {
       await refreshTodayOnly();
+      DV.backoff = 0; DV.backoffUntil = 0;
       if (state.mode === "today") { renderToday(); if (DV.prefs.team) loadTeamFor(DV.date); }
       if (ROLE !== "scrum") refreshDayPill();   // SCRUM não acompanha as próprias horas
-    } catch { /* tenta na próxima */ }
+    } catch (e) {
+      if (isRateLimited(e?.message)) { DV.backoff = nextBackoff(DV.backoff); DV.backoffUntil = Date.now() + DV.backoff; }
+    }
   }, every);
 }
 function stopTodayPolling() { if (DV.poll) clearInterval(DV.poll); DV.poll = null; }

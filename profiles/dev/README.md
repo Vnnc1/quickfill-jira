@@ -89,7 +89,7 @@ sem movimento*, para não poluir os cartões.
 
 ## Equipe
 
-Ao vivo a cada 5 s, com meta e teto por pessoa. Com **Todos**, soma MEED e SUS,
+Ao vivo a cada 30 s, com meta e teto por pessoa. Com **Todos**, soma MEED e SUS,
 independentemente do campo *Projetos* da Equipe nas Opções.
 
 - **Resumo:** horas da equipe no dia, média, e uma barra com quantos bateram a meta, ficaram

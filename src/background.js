@@ -124,11 +124,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * erro e a tarefa sumia das somas da Equipe sem ninguém perceber.
  * POST/PUT só repetem em 429 — que garante que nada foi gravado.
  */
+/**
+ * Freio do limite de uso: quando o Jira responde 429, todas as chamadas seguintes (não só a que
+ * levou o 429) esperam o tempo pedido. Assim as leituras em paralelo não continuam batendo no limite.
+ */
+let _rateLimitedUntil = 0;
+const RATE_WAIT_MAX_MS = 30 * 1000;
+
 async function jira(path, { method = "GET", body, cfg, retries = 4 } = {}) {
   const conf = cfg || (await getConfig());
   assertConfigured(conf);
 
   for (let attempt = 0; ; attempt++) {
+    const wait = _rateLimitedUntil - Date.now();
+    if (wait > 0) await sleep(Math.min(wait, RATE_WAIT_MAX_MS));
     const res = await fetch(`${conf.baseUrl}${path}`, {
       method,
       headers: {
@@ -140,10 +149,15 @@ async function jira(path, { method = "GET", body, cfg, retries = 4 } = {}) {
     });
 
     const retryable = res.status === 429 || (method === "GET" && [502, 503, 504].includes(res.status));
-    if (retryable && attempt < retries) {
+    if (res.status === 429) {
+      // Retry-After em segundos; sem ele, espera crescente (2 s, 4 s, 8 s…)
       const after = Number(res.headers?.get?.("Retry-After"));
-      await sleep(after > 0 ? Math.min(after, 10) * 1000 : 400 * 2 ** attempt + Math.random() * 200);
-      continue;
+      const ms = after > 0 ? after * 1000 : 2000 * 2 ** attempt;
+      _rateLimitedUntil = Math.max(_rateLimitedUntil, Date.now() + Math.min(ms, RATE_WAIT_MAX_MS));
+    }
+    if (retryable && attempt < retries) {
+      if (res.status !== 429) await sleep(400 * 2 ** attempt + Math.random() * 200);
+      continue;   // no 429, a espera fica no início da próxima volta (vale para todas as chamadas)
     }
 
     if (res.status === 204) return null;
