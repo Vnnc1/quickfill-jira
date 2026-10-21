@@ -143,7 +143,9 @@ export function kindResolver(dm) {
       if (k === "deploy" && PRD_RX.test(nm)) k = "prd";
     }
     const cat = dm.statuses?.[id]?.cat;
-    if (cat === "done" && (k === "other" || k === "validated")) return "done";
+    // Categoria Concluído no Jira = entregue (Finalizados), mesmo que o quadro guarde esse status
+    // numa coluna como PR/Feito; só o deploy de produção tem regra própria.
+    if (cat === "done" && k !== "prd") return "done";
     if (k === "other" && cat === "new") return "todo";
     return k;
   };

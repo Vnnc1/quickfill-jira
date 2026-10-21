@@ -62,3 +62,14 @@ test("Reaberto segue o período: conta as reaberturas que aconteceram nele", () 
   const w7 = demandBoard(dm(), { range: periodRange("7", { today: "2026-10-15" }), now });
   assert.deepEqual(w7.groups.reopen.map((r) => r.issue.key), ["MEED-2"]);
 });
+
+test("Concluído no Jira vai para Finalizados, mesmo numa coluna PR do quadro", () => {
+  const d = dm();
+  d.spaces = [{ project: "MEED", kinds: { K: { kind: "feito", column: "PR" } } }];   // o quadro pôs Concluído na coluna PR
+  d.statuses.K = { name: "Concluído", cat: "done" };
+  d.issues.push({ key: "MEED-9", project: "MEED", status: { id: "K", name: "Concluído" }, assignee: { id: me }, myMinutes: 30, myByDay: {},
+    transitions: [t("2026-10-15", 10, "A", "K")] });
+  const b = demandBoard(d, { range: periodRange("today", { today: "2026-10-15" }), now: ms("2026-10-15", 15) });
+  assert.deepEqual(b.groups.shipped.map((r) => r.issue.key), ["MEED-9"]);
+  assert.ok(!b.groups.feito.some((r) => r.issue.key === "MEED-9"));
+});
