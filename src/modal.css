@@ -1613,3 +1613,4 @@ html.float .top-actions .ic { width: 28px; height: 28px; }
 .inp.dm-day { flex: 0 0 140px; width: 140px; min-width: 140px; height: 30px; padding: 0 8px; font-size: 12px; box-sizing: border-box; }
 .inp.dm-day.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 #qaPeriodBar { flex-wrap: wrap; }
+#scPeriodBar { flex-wrap: wrap; }

@@ -4619,23 +4619,27 @@ const SC_PREF_LABELS = [
   ["stages", "Onde estão os itens"], ["period", "Resumo do período"], ["flow", "Métricas de fluxo"],
   ["burndown", "Burndown"], ["tree", "Itens e subtarefas"], ["velocity", "Velocidade das últimas sprints"],
 ];
-const SC = { data: null, seq: 0, unit: "items", sort: "load", q: "", users: new Map(), treeAll: false, period: "sprint", sprintId: "", prefs: { ...SC_PREFS_DEFAULT },
+const SC = { data: null, seq: 0, unit: "items", sort: "load", q: "", users: new Map(), treeAll: false, period: "sprint", day: "", sprintId: "", prefs: { ...SC_PREFS_DEFAULT },
   pOpen: new Set(), pStage: new Map(), unOpen: true };
 try { SC.unOpen = localStorage.getItem("qf.unOpen") !== "0"; } catch { /* sem storage */ }
 try {
   SC.period = localStorage.getItem("qf.scPeriod") || "sprint";
+  if (SC.period === "day") SC.period = "today";   // um dia escolhido não fica salvo
   SC.prefs = { ...SC_PREFS_DEFAULT, ...JSON.parse(localStorage.getItem("qf.scPrefs") || "{}") };
   SC.unit = localStorage.getItem("qf.scUnit") || "items";
 } catch { /* sem storage */ }
 const STAGE_COLOR = { todo: "var(--surface-3)", doing: "var(--data)", blocked: "var(--err)", feito: "#9f8fef", deploy: "#6cc3e0", qa: "var(--warn)", validated: "#94d2b4", done: "var(--ok)" };
-const PERIOD_LABEL = { sprint: "na sprint", today: "hoje", 7: "nos últimos 7 dias", 14: "nos últimos 14 dias" };
-
-/** Início do período escolhido (Sprint · Hoje · 7 · 14 dias). */
-function scFrom(sprint) {
-  if (SC.period === "sprint" || SC.data?.past) return sprint?.start ? Date.parse(`${sprint.start}T00:00:00`) : 0;
-  const n = SC.period === "today" ? 1 : Number(SC.period);
-  return Date.parse(`${addDaysIso(todayISO(), -(n - 1))}T00:00:00`);
+/**
+ * Período escolhido (Sprint · Hoje · Ontem · 7 · 14 dias · um dia no calendário): de/até em ms e o texto.
+ * Sprint (ou uma sprint anterior) vai do início dela até agora; um dia passado termina no fim daquele dia.
+ */
+function scRange(sprint) {
+  if (SC.period === "sprint" || SC.data?.past) return { fromMs: sprint?.start ? Date.parse(`${sprint.start}T00:00:00`) : 0, toMs: Infinity, label: "na sprint" };
+  const r = periodRange(SC.period, { today: todayISO(), day: SC.day });
+  const label = typeof r.period === "number" ? `nos últimos ${r.period} dias` : r.label;
+  return { fromMs: r.fromMs, toMs: r.now ? Infinity : r.toMs, label };
 }
+const scLabel = () => scRange(null).label;
 const scSettings = () => SC.data?.settings || {};
 const isHighPrio = (p) => ["p1", "p2"].includes(prioTone(p));
 
@@ -4873,7 +4877,7 @@ function renderSprint() {
 
   for (const { space: sp, sprint: s } of list) {
     const h = sprintHealth(s, today);
-    const fromMs = scFrom(s);
+    const { fromMs, toMs } = scRange(s);
     const card = el("div", "card pg-sprint");
     const top = el("div", "pg-sprint-top");
     top.append(el("span", "sp-space", sp.project), el("b", null, s.name),
@@ -4979,12 +4983,13 @@ function renderSprint() {
 
     /* --- resumo do período --- */
     if (P.period && SC.period !== "sprint") {
-      const moves = s.issues.flatMap((i) => (i.transitions || []).filter((t) => t.at >= fromMs));
-      const doneP = h.items.filter((i) => stageOf(i) === "done" && (i.catChanged || 0) >= fromMs).length;
-      const reopenP = s.issues.reduce((n, i) => n + reopenEvents(i, fromMs).length, 0);
+      const inP = (ms) => (ms || 0) >= fromMs && (ms || 0) <= toMs;
+      const moves = s.issues.flatMap((i) => (i.transitions || []).filter((t) => inP(t.at)));
+      const doneP = h.items.filter((i) => stageOf(i) === "done" && inP(i.catChanged)).length;
+      const reopenP = s.issues.reduce((n, i) => n + reopenEvents(i, fromMs, toMs).length, 0);
       const toQa = moves.filter((t) => t.toStage === "qa").length;
-      const createdP = s.issues.filter((i) => (i.created || 0) >= fromMs).length;
-      const pc = mCard(`Resumo ${PERIOD_LABEL[SC.period]}`, `${moves.length} movimentação(ões)`);
+      const createdP = s.issues.filter((i) => inP(i.created)).length;
+      const pc = mCard(`Resumo ${scLabel()}`, `${moves.length} movimentação(ões)`);
       pc.classList.add("half");
       const k = el("div", "m-kpis four");
       k.append(kpiTile(String(doneP), "concluídas"), kpiTile(String(toQa), "foram para validação"),
@@ -4995,7 +5000,7 @@ function renderSprint() {
 
     /* --- métricas de fluxo --- */
     if (P.flow) {
-      const f = flowMetrics(s, { today, fromMs: SC.period === "sprint" ? 0 : fromMs });
+      const f = flowMetrics(s, { today, fromMs: SC.period === "sprint" ? 0 : fromMs, toMs: SC.period === "sprint" ? Infinity : toMs });
       const fc = mCard("Métricas de fluxo", "HUs, tarefas e bugs");
       fc.classList.add("half");
       const k = el("div", "m-kpis four");
@@ -5006,7 +5011,7 @@ function renderSprint() {
         kpiTile(f.firstPassRate == null ? "—" : pct(f.firstPassRate), "aprovadas de 1ª", "passaram pelo QA sem reabrir", f.firstPassRate != null && f.firstPassRate >= 0.8 ? "ok" : ""),
       );
       fc.appendChild(k);
-      const bits = [`vazão: ${f.throughput.toFixed(1).replace(".", ",")} ${pl(f.throughput, "concluída", "concluídas")} por dia útil ${PERIOD_LABEL[SC.period]}`, `${f.wipNow} em andamento agora`];
+      const bits = [`vazão: ${f.throughput.toFixed(1).replace(".", ",")} ${pl(f.throughput, "concluída", "concluídas")} por dia útil ${scLabel()}`, `${f.wipNow} em andamento agora`];
       if (f.blockedNow) bits.push(`${f.blockedNow} ${pl(f.blockedNow, "impedida", "impedidas")}${f.blockedAvg ? ` · tempo médio impedido ${fmtSpan(f.blockedAvg)}` : ""}`);
       fc.appendChild(el("p", "muted xs", `${bits.join(" · ")}.`));
       box.appendChild(fc);
@@ -5283,9 +5288,11 @@ function renderPeople() {
   const list = scSprints({ cross: true });
   if (!list.length) return scEmpty(box);
   const issues = list.flatMap((x) => x.sprint.issues);
-  const fromMs = SC.period === "sprint" ? 0 : scFrom(null);
+  const rng = scRange(null);
+  const fromMs = SC.period === "sprint" ? 0 : rng.fromMs;
+  const toMs = SC.period === "sprint" ? Infinity : rng.toMs;
   const filtered = SC.period !== "sprint";
-  const { people, devs, qa, sm, design, unassigned } = peopleLoad(issues, { ...scSettings(), fromMs });
+  const { people, devs, qa, sm, design, unassigned } = peopleLoad(issues, { ...scSettings(), fromMs, toMs });
   const byKey = new Map(issues.map((i) => [i.key, i]));
   const q = SC.q.trim().toLowerCase();
   const sortFn = SC.sort === "name" ? (a, b) => a.name.localeCompare(b.name) : SC.sort === "wip" ? (a, b) => b.wip - a.wip || b.open - a.open : () => 0;
@@ -5302,7 +5309,7 @@ function renderPeople() {
     kpiTile(String(unassigned.length), "sem responsável", free ? `${free} ${pl(free, "dev livre", "devs livres")}` : "", unassigned.length ? "warn" : "ok"),
   );
   box.appendChild(k);
-  if (filtered) box.appendChild(el("p", "muted xs", `Mostrando quem teve movimento ${PERIOD_LABEL[SC.period]} e só os itens que se moveram no período.`));
+  if (filtered) box.appendChild(el("p", "muted xs", `Mostrando quem teve movimento ${scLabel()} e só os itens que se moveram no período.`));
 
   /* --- sem responsável: sugestão (só desenvolvedores) + Atribuir --- */
   if (unassigned.length) {
@@ -5346,7 +5353,7 @@ function renderPeople() {
       const y = $("scroll").scrollTop; renderPeople(); $("scroll").scrollTop = y;
     }, picked));
     const bits = [];
-    if (filtered || p.isSm) bits.push(`${p.moves} movimentação(ões) ${PERIOD_LABEL[SC.period]}`);
+    if (filtered || p.isSm) bits.push(`${p.moves} movimentação(ões) ${scLabel()}`);
     if (filtered && p.doneInPeriod) bits.push(`✓ ${p.doneInPeriod} ${pl(p.doneInPeriod, "concluída", "concluídas")} no período`);
     if (p.wip) bits.push(`◐ ${p.wip} em andamento${p.oldest ? ` (mais antigo há ${p.oldest}d)` : ""}`);
     if (p.stages.blocked.length) bits.push(`⛔ ${p.stages.blocked.length} ${pl(p.stages.blocked.length, "impedida", "impedidas")}`);
@@ -5380,7 +5387,7 @@ function renderPeople() {
     // Scrum Master: os cards que ela movimentou no período (mesmo sem estar atribuída)
     if (p.isSm) {
       const moved = [...p.active].map((k) => byKey.get(k)).filter((i) => i && i.assignee?.id !== p.id);
-      if (moved.length) det.appendChild(el("div", "m-sub pp-sub", `Cards que movimentou ${PERIOD_LABEL[SC.period]}`));
+      if (moved.length) det.appendChild(el("div", "m-sub pp-sub", `Cards que movimentou ${scLabel()}`));
       for (const i of moved.slice(0, 20)) {
         const last = [...(i.transitions || [])].reverse().find((t) => t.by === p.id);
         const right = el("span", "dm-right");
@@ -5409,14 +5416,14 @@ function renderPeople() {
     box.appendChild(el("div", "m-sub", "QA — validação (fora das regras de WIP e de atribuição)"));
     for (const p of shownQa) box.appendChild(personCardSc(p));
   }
-  if (!shownDevs.length && !shownQa.length && !shownDesign.length) { const e = el("div", "empty"); e.innerHTML = filtered ? `<b>🔎</b>Ninguém com movimento ${PERIOD_LABEL[SC.period]}.` : "<b>🔎</b>Ninguém com esse nome na sprint."; box.appendChild(e); }
+  if (!shownDevs.length && !shownQa.length && !shownDesign.length) { const e = el("div", "empty"); e.innerHTML = filtered ? `<b>🔎</b>Ninguém com movimento ${scLabel()}.` : "<b>🔎</b>Ninguém com esse nome na sprint."; box.appendChild(e); }
 }
 
 /* ---------- Riscos ---------- */
 
 function scRisks() {
   return scSprints({ cross: true }).map(({ space: sp, sprint: s }) => ({ sp, s,
-    r: sprintRisks(s, { staleDays: scSettings().staleDays, today: SC.data.today, isHigh: isHighPrio, fromMs: scFrom(s), qaPeople: scSettings().qaPeople || [] }) }));
+    r: sprintRisks(s, { staleDays: scSettings().staleDays, today: SC.data.today, isHigh: isHighPrio, fromMs: scRange(s).fromMs, toMs: scRange(s).toMs, qaPeople: scSettings().qaPeople || [] }) }));
 }
 
 function renderRisks() {
@@ -5433,13 +5440,13 @@ function renderRisks() {
       || (x.id === "feitoQueue" && n >= scSettings().feitoThreshold);
     const t = el("button", `dm-tile ${n && hot ? "err" : ""} ${n ? "has" : ""}`);
     t.append(el("b", null, String(n)), el("span", null, `${x.icon} ${x.label}`));
-    t.dataset.tip = `${x.tip}${x.state ? " · situação atual" : ` · ${PERIOD_LABEL[SC.period]}`}`;
+    t.dataset.tip = `${x.tip}${x.state ? " · situação atual" : ` · ${scLabel()}`}`;
     t.disabled = !n;
     t.addEventListener("click", () => document.getElementById(`rk-${x.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
     sum.appendChild(t);
   }
   box.appendChild(sum);
-  box.appendChild(el("p", "muted xs", `Reabertas, fila do QA, aguardando deploy e entradas seguem o período (${PERIOD_LABEL[SC.period]}); impedidas, paradas, atrasadas e sem responsável mostram a situação de agora.`));
+  box.appendChild(el("p", "muted xs", `Reabertas, fila do QA, aguardando deploy e entradas seguem o período (${scLabel()}); impedidas, paradas, atrasadas e sem responsável mostram a situação de agora.`));
 
   const qaQ = merged.qaQueue;
   if (qaQ.length >= 3) {
@@ -5576,6 +5583,7 @@ $("scSearch").addEventListener("input", () => {
   scSearchTimer = setTimeout(() => { SC.search = $("scSearch").value; renderSprint(); $("scroll").scrollTop = 0; }, 150);
 });
 document.querySelectorAll("#scPeriod button").forEach((b) => b.classList.toggle("on", b.dataset.p === SC.period));
+paintScDay();
 document.querySelectorAll("#scUnit button").forEach((b) => b.classList.toggle("on", b.dataset.unit === SC.unit));
 /* Sprint anterior: escolhe no seletor ao lado do Período; "Sprint atual" volta ao padrão. */
 function scPastSprint() {
@@ -5607,6 +5615,17 @@ function paintSprintPick() {
     b.disabled = !!SC.sprintId && b.dataset.p !== "sprint";
     b.classList.toggle("on", SC.sprintId ? b.dataset.p === "sprint" : b.dataset.p === SC.period);
   });
+  paintScDay();
+}
+/** Calendário do período: marcado quando um dia foi escolhido; desligado numa sprint anterior. */
+function paintScDay() {
+  const d = $("scDay");
+  if (!d) return;
+  d.max = todayISO();
+  d.min = addDaysIso(todayISO(), -120);
+  d.value = SC.period === "day" && !SC.sprintId ? SC.day : "";
+  d.disabled = !!SC.sprintId;
+  d.classList.toggle("on", SC.period === "day" && !SC.sprintId);
 }
 $("scSprintPick").addEventListener("change", (e) => {
   SC.sprintId = e.target.value;
@@ -5617,9 +5636,19 @@ $("scSprintPick").addEventListener("change", (e) => {
 $("scPeriod").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
-  SC.period = b.dataset.p;
+  SC.period = b.dataset.p; SC.day = "";
   document.querySelectorAll("#scPeriod button").forEach((x) => x.classList.toggle("on", x === b));
+  paintScDay();
   try { localStorage.setItem("qf.scPeriod", SC.period); } catch { /* sem storage */ }
+  renderScrum();
+});
+$("scDay").addEventListener("change", (e) => {
+  const v = e.target.value;
+  SC.period = !v || v === todayISO() ? "today" : "day";
+  SC.day = SC.period === "day" ? v : "";
+  document.querySelectorAll("#scPeriod button").forEach((x) => x.classList.toggle("on", x.dataset.p === SC.period));
+  paintScDay();
+  try { localStorage.setItem("qf.scPeriod", SC.period === "day" ? "today" : SC.period); } catch { /* sem storage */ }
   renderScrum();
 });
 

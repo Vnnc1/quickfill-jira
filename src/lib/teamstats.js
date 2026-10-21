@@ -61,11 +61,11 @@ export const isReturn = (t) => t.fromStage && t.toStage && ORDER[t.fromStage] >=
  * (Validação → Reaberto → Em andamento → Validação → Reaberto = 2 voltas).
  * Sem a coluna Reaberto no histórico (dados antigos), cai na regra geral de retorno.
  */
-export function reopenEvents(i, fromMs = 0) {
+export function reopenEvents(i, fromMs = 0, toMs = Infinity) {
   const tr = i.transitions || [];
   const known = tr.some((t) => t.toKind !== undefined);
   const list = known ? tr.filter((t) => t.toKind === "reopen" && t.fromKind !== "reopen") : tr.filter(isReturn);
-  return list.filter((t) => t.at >= fromMs);
+  return list.filter((t) => t.at >= fromMs && t.at <= toMs);
 }
 
 /** Pessoa da equipe de QA (Opções): pelo accountId ou pelo começo do nome. */
@@ -195,7 +195,8 @@ export function sprintHealth(sprint, today) {
  * Carga por pessoa na sprint. `wipLimit` marca quem está com itens demais em andamento;
  * para o que está sem responsável sugere quem já atua na mesma tarefa pai e tem menos WIP.
  */
-export function peopleLoad(issues, { wipLimit = 2, staleDays = 3, qaPeople = [], smPeople = [], designPeople = [], ignorePeople = [], fromMs = 0, now = Date.now() } = {}) {
+export function peopleLoad(issues, { wipLimit = 2, staleDays = 3, qaPeople = [], smPeople = [], designPeople = [], ignorePeople = [], fromMs = 0, toMs = Infinity, now = Date.now() } = {}) {
+  const inP = (ms) => !!ms && ms >= fromMs && ms <= toMs;
   const isQa = qaMatcher(qaPeople);
   const isSm = qaMatcher(smPeople);
   const isDesign = qaMatcher(designPeople);
@@ -213,7 +214,7 @@ export function peopleLoad(issues, { wipLimit = 2, staleDays = 3, qaPeople = [],
     const st = stageOf(i);
     // Movimentos no período feitos por qualquer pessoa da sprint (quem moveu o card)
     for (const t of i.transitions || []) {
-      if (t.at < fromMs || !t.by || ignored(t.by, t.byName)) continue;
+      if (t.at < fromMs || t.at > toMs || !t.by || ignored(t.by, t.byName)) continue;
       const mover = person({ id: t.by, name: t.byName });
       mover.moves++;
       mover.active.add(i.key);
@@ -225,16 +226,16 @@ export function peopleLoad(issues, { wipLimit = 2, staleDays = 3, qaPeople = [],
     p.points += i.points || 0;
     if (st === "done") {
       p.donePts += i.points || 0;
-      if ((i.catChanged || 0) >= fromMs) p.doneInPeriod++;
+      if (inP(i.catChanged) || (!fromMs && toMs === Infinity)) p.doneInPeriod++;
     }
-    p.returns += reopenEvents(i, fromMs).length;
+    p.returns += reopenEvents(i, fromMs, toMs).length;
     if (st === "doing" && businessAge(lastMove(i), now) >= staleDays) p.stalled++;
-    if ((lastMove(i) || 0) >= fromMs) p.active.add(i.key);
+    if (toMs === Infinity ? (lastMove(i) || 0) >= fromMs : (i.transitions || []).some((t) => inP(t.at))) p.active.add(i.key);
     p.parents.add(i.parentKey || i.key);
   }
   const list = [...people.values()]
     // Sem itens: só aparece quem moveu cards no período filtrado (e a Scrum Master, sempre)
-    .filter((p) => STAGES.some((s) => p.stages[s.id].length) || p.isSm || (fromMs > 0 && p.moves))
+    .filter((p) => STAGES.some((s) => p.stages[s.id].length) || p.isSm || ((fromMs > 0 || toMs !== Infinity) && p.moves))
     .map((p) => {
       const wip = p.stages.doing.length;
       const open = STAGES.filter((s) => s.id !== "done").reduce((n, s) => n + p.stages[s.id].length, 0);
@@ -274,10 +275,10 @@ export const RISKS = [
 ];
 
 /**
- * Riscos da sprint. `fromMs` (filtro de período) vale para os eventos — reabertas, entradas em
+ * Riscos da sprint. `fromMs`/`toMs` (filtro de período) valem para os eventos — reabertas, entradas em
  * Feito/Validação e itens criados; os riscos de estado (impedidas, paradas, atrasadas…) são sempre "agora".
  */
-export function sprintRisks(sprint, { staleDays = 3, today, now = Date.now(), isHigh = () => false, fromMs = 0, qaPeople = [] } = {}) {
+export function sprintRisks(sprint, { staleDays = 3, today, now = Date.now(), isHigh = () => false, fromMs = 0, toMs = Infinity, qaPeople = [] } = {}) {
   const isQa = qaMatcher(qaPeople);
   const startMs = Date.parse(`${sprint.start}T00:00:00`);
   const evFrom = Math.max(fromMs, 0);
@@ -290,19 +291,20 @@ export function sprintRisks(sprint, { staleDays = 3, today, now = Date.now(), is
     // As subtarefas ficam dentro do card e não entram nessas contagens.
     const card = !i.isSubtask;
     if (card && open && (i.flagged || st === "blocked")) out.flagged.push({ issue: i, age, why: st === "blocked" ? i.status.name : "sinalizada" });
-    const reopens = reopenEvents(i, Math.max(startMs, evFrom));
+    const reopens = reopenEvents(i, Math.max(startMs, evFrom), toMs);
     if (reopens.length) {
       const last = reopens[reopens.length - 1];
       out.returned.push({ issue: i, count: reopens.length, last, byQa: reopens.some((t) => isQa(t.by, t.byName)) });
     }
     if (card && st === "doing" && age >= staleDays) out.stalled.push({ issue: i, age });
-    if (card && st === "qa" && (enteredStageAt(i, "qa") || lastMove(i) || 0) >= evFrom) out.qaQueue.push({ issue: i, age });
-    if (card && st === "feito" && (enteredStageAt(i, "feito") || lastMove(i) || 0) >= evFrom) out.feitoQueue.push({ issue: i, age });
+    const entered = (stage) => { const at = enteredStageAt(i, stage) || lastMove(i) || 0; return at >= evFrom && at <= toMs; };
+    if (card && st === "qa" && entered("qa")) out.qaQueue.push({ issue: i, age });
+    if (card && st === "feito" && entered("feito")) out.feitoQueue.push({ issue: i, age });
     if (open && i.due && i.due < today) out.overdue.push({ issue: i, age, late: businessDays(i.due, today).length - 1 });
     if (card && st === "todo" && isHigh(i.priority)) out.highTodo.push({ issue: i, age });
     if (open && !i.assignee && !i.isSubtask) out.unassigned.push({ issue: i, age });
     if (i.estimate && i.spent > i.estimate) out.overEstimate.push({ issue: i, age, over: i.spent - i.estimate });
-    if (!i.isSubtask && i.created && i.created > startMs + DAY_MS && i.created >= evFrom) out.added.push({ issue: i, age });
+    if (!i.isSubtask && i.created && i.created > startMs + DAY_MS && i.created >= evFrom && i.created <= toMs) out.added.push({ issue: i, age });
     if (orphanOpen(i)) out.orphanSubs.push({ issue: i, age, own: i.status.name });
   }
   for (const k of ["stalled", "qaQueue", "feitoQueue", "flagged"]) out[k].sort((a, b) => b.age - a.age);
@@ -333,7 +335,7 @@ const avg = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : nul
  * Cycle time (1ª vez em andamento → concluído), tempo médio na fila do QA, tempo impedido,
  * taxa de reabertura, vazão e aprovação de primeira — sobre HUs, tarefas e bugs da sprint.
  */
-export function flowMetrics(sprint, { today, fromMs = 0, now = Date.now() } = {}) {
+export function flowMetrics(sprint, { today, fromMs = 0, toMs = Infinity, now = Date.now() } = {}) {
   const items = sprint.issues.filter((i) => !i.isSubtask);
   const done = items.filter((i) => stageOf(i) === "done");
   const cycles = done.map((i) => {
@@ -346,8 +348,9 @@ export function flowMetrics(sprint, { today, fromMs = 0, now = Date.now() } = {}
   const reopened = items.filter((i) => reopenEvents(i).length);
   const passedQa = items.filter((i) => (i.transitions || []).some((t) => t.fromStage === "qa"));
   const firstPass = passedQa.filter((i) => !reopenEvents(i).length);
-  const days = businessDays(fromMs ? isoOf(fromMs) : sprint.start, today).length || 1;
-  const doneInPeriod = done.filter((i) => (i.catChanged || 0) >= fromMs);
+  const lastDay = toMs === Infinity ? today : isoOf(toMs);
+  const days = businessDays(fromMs ? isoOf(fromMs) : sprint.start, lastDay).length || 1;
+  const doneInPeriod = done.filter((i) => (i.catChanged || 0) >= fromMs && (i.catChanged || 0) <= toMs);
   return {
     cycleAvg: avg(cycles),
     qaWaitAvg: avg(qaTimes),
