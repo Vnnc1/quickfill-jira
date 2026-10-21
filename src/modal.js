@@ -6235,7 +6235,11 @@ chrome.runtime.onMessage.addListener((msg) => {
   try {
     defaults = await send("GET_DEFAULTS");
     DEF = { ...DEF, ...defaults, workday: { ...DEF.workday, ...(defaults.workday || {}) } };
-    setMeetingApi({ project: defaults.defaultProject || defaults.spaces?.batch?.label || "" });   // reuniões: onde a demanda é criada
+    // Reuniões e atividades: onde a demanda é criada (o DESIGN cria no espaço UX; MEED e SUS ficam no seletor)
+    const mtgProjects = [defaults.spaces?.batch?.label, defaults.spaces?.sustentacao?.label];
+    if (ROLE === "design" && defaults.uxProject) mtgProjects.unshift(defaults.uxProject);
+    setMeetingApi({ project: ROLE === "design" && defaults.uxProject ? defaults.uxProject : (defaults.defaultProject || defaults.spaces?.batch?.label || ""),
+      projects: [...new Set(mtgProjects.filter(Boolean))] });
     state.storyPoints = DEF.defaultStoryPoints;
     renderFib();
     updateTimeHint();

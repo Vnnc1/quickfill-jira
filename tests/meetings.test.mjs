@@ -27,5 +27,5 @@ test("cada perfil tem modelos próprios, com ids únicos e sem o tipo daily", ()
 
 test("não existe mais o tipo daily", () => {
   assert.equal(MEETING_TYPES.daily, undefined);
-  assert.deepEqual(Object.keys(MEETING_TYPES), ["alinhamento", "reuniao", "outro", "refinamento", "deploy", "config", "testes"]);
+  assert.deepEqual(Object.keys(MEETING_TYPES), ["alinhamento", "reuniao", "outro", "refinamento", "deploy", "config", "testes", "outroexec"]);
 });

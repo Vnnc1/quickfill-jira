@@ -24,6 +24,7 @@ export const MEETING_TYPES = {
   deploy: { label: "Deploy", color: "#e774bb" },
   config: { label: "Configuração", color: "#9f8fef" },
   testes: { label: "Testes", color: "#4bce97" },
+  outroexec: { label: "Outro", color: "#94a3b4" },   // "Outro" do grupo Execução
 };
 
 export const MEETING_DEFAULTS = { meetingsDot: true, meetingsGoal: true, meetingsDur: 30, meetingTemplates: null };
@@ -45,17 +46,19 @@ export const defaultTemplates = () => (ROLE_TEMPLATES[ROLE] || ROLE_TEMPLATES.qa
 
 const cache = { list: [], log: [], settings: { dot: true, goal: true, dur: 30, templates: defaultTemplates() } };
 /** Ponte com o modal.js: enviar ao serviço (criar no Jira) e o projeto padrão. */
-const api = { send: null, project: "" };
+const api = { send: null, project: "", projects: [] };
 export function setMeetingApi(a) { Object.assign(api, a); }
 const SP = [1, 2, 3, 5, 8, 13, 21];
 /** Opções do campo Categoria do Jira (lidas uma vez por janela, quando a pessoa marca "Criar a demanda"). */
-const catState = { loading: false, loaded: false, fieldId: null, options: null, error: null };
+const catStates = {};   // por projeto: MEED e SUS podem ter categorias diferentes
+const catOf = (project) => (catStates[project || ""] ||= { loading: false, loaded: false, fieldId: null, options: null, error: null });
 
 const pad = (n) => String(n).padStart(2, "0");
 export const hhmm = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 export const fmtMin = (m) => { m = Math.max(0, Math.round(m)); const h = Math.floor(m / 60), r = m % 60; return h ? (r ? `${h}h ${r}m` : `${h}h`) : `${r}m`; };
 const parseHM = (s) => { const [h, m] = String(s || "").split(":").map(Number); return Number.isFinite(h) ? h * 60 + (m || 0) : null; };
 export const rgba = (hex, a) => `rgba(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(",")},${a})`;
+const brDay = (iso) => `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}`;
 const isoDay = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 /** A daily deixou de ser um tipo próprio: o que foi marcado como daily passa a ser "Outro". */
 const noDaily = (x) => (x?.type === "daily" ? { ...x, type: "outro" } : x);
@@ -172,28 +175,45 @@ export function openMeetingModal(m, { onDone } = {}) {
   document.querySelector(".mtg-modal")?.remove();
   const editing = !!m.id;
   const heading = () => (groupOfType(cur.type) === "execucao" ? (editing ? "Editar atividade" : "Marcar atividade") : (editing ? "Editar reunião" : "Marcar reunião"));
-  const cur = { type: "reuniao", title: "", desc: "", jira: false, startDate: m.date, dueDate: m.date, sp: null, status: "done", ...noDaily(m) };
+  const cur = { type: "reuniao", title: "", desc: "", jira: false, startDate: m.date, dueDate: m.date, sp: null, status: "done", project: api.project, ...noDaily(m) };
   if (!cur.title && !editing) cur.title = MEETING_TYPES[cur.type].label;
+  let group = groupOfType(cur.type);
+  // Barra lateral dos modelos: aberta ou fechada, lembrada entre as vezes (fechada em janelas estreitas)
+  let sideOpen = window.innerWidth >= 560;
+  try { const v = localStorage.getItem("qf.mtgSide"); if (v != null) sideOpen = v === "1"; } catch { /* sem storage */ }
+  const projects = [...new Set([cur.project, ...(api.projects || [])].filter(Boolean))];
 
   const wrap = document.createElement("div");
   wrap.className = "mtg-modal";
   wrap.innerHTML = `
-    <div class="mtg-box" role="dialog" aria-modal="true" aria-labelledby="mtgTitleH">
+    <div class="mtg-box${editing ? "" : " has-side"}${sideOpen ? " side-open" : ""}" role="dialog" aria-modal="true" aria-labelledby="mtgTitleH">
+      ${editing ? "" : `<aside class="mtg-side" aria-label="Modelos">
+        <button type="button" class="mtg-side-tog" data-side-tog aria-expanded="${sideOpen}" title="Mostrar ou ocultar os modelos">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Modelos ${esc(roleLabel())}</span><small data-tpl-n></small>
+        </button>
+        <div class="mtg-side-body">
+          <div class="mtg-tpls" data-tpls role="group" aria-label="Modelos"></div>
+          <button type="button" class="mtg-link" data-tpl-edit>Editar modelos</button>
+        </div>
+      </aside>`}
+      <div class="mtg-main">
       <div class="mtg-head"><b id="mtgTitleH">${editing ? "Editar reunião" : "Marcar reunião"}</b><button class="ic" data-x aria-label="Fechar">✕</button></div>
-      ${editing ? "" : `<div class="mtg-tpl-wrap">
-        <div class="mtg-tpl-head"><span>Modelos ${esc(roleLabel())}</span><button type="button" class="mtg-link" data-tpl-edit>Editar modelos</button></div>
-        <div class="mtg-tpls" data-tpls role="group" aria-label="Modelos"></div>
-      </div>`}
+      <div class="seg mtg-grp" data-grp role="group" aria-label="Grupo">${Object.entries(MEETING_GROUPS).map(([g, x]) => `<button type="button" data-g="${g}">${esc(x.label)}</button>`).join("")}</div>
       <div class="mtg-types" role="group" aria-label="Tipo"></div>
       <label class="mtg-f"><span>Título</span><input class="inp" data-title maxlength="120" /></label>
-      <div class="mtg-row">
+      <div class="mtg-row mtg-row3">
+        <label class="mtg-f"><span>Dia</span><input class="inp" type="date" data-date /></label>
         <label class="mtg-f"><span>Começou</span><input class="inp" type="time" step="300" data-start /></label>
         <label class="mtg-f"><span>Terminou</span><input class="inp" type="time" step="300" data-end /></label>
       </div>
       <div class="mtg-dur muted xs"></div>
       <label class="mtg-f"><span>Descrição <em>(opcional)</em></span><textarea class="inp" rows="3" data-desc placeholder="O que foi combinado"></textarea></label>
       <div class="mtg-jira" data-jira-wrap>
-        <label class="mtg-chk"><input type="checkbox" data-jira /><span>Criar a demanda no Jira <em data-proj></em></span></label>
+        <div class="mtg-jira-top">
+          <label class="mtg-chk"><input type="checkbox" data-jira /><span>Criar a demanda no Jira</span></label>
+          <label class="mtg-proj" data-proj-wrap><span>em</span><select class="inp" data-proj aria-label="Projeto da demanda"></select></label>
+        </div>
         <div class="mtg-jira-fields" data-jira-fields>
           <div class="mtg-row">
             <label class="mtg-f"><span>Data de início</span><input class="inp" type="date" data-sdate /></label>
@@ -214,36 +234,39 @@ export function openMeetingModal(m, { onDone } = {}) {
         <button class="btn sm ghost" data-x>Cancelar</button>
         <button class="btn sm primary" data-save>Salvar</button>
       </div>
+      </div>
     </div>`;
   const $ = (s) => wrap.querySelector(s);
   const types = $(".mtg-types");
+  /* Reuniões | Execução: o botão escolhe o grupo e só os tipos dele aparecem */
+  const pickType = (k) => {
+    const t = MEETING_TYPES[k];
+    const auto = !cur.title || Object.values(MEETING_TYPES).some((x) => x.label === cur.title);
+    cur.type = k;
+    if (auto) { cur.title = k === "outro" || k === "outroexec" ? "" : t.label; $("[data-title]").value = cur.title; }
+    paintTypes(); paintJira(); pickCategory();
+  };
+  $("[data-grp]").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-g]");
+    if (!b || b.dataset.g === group) return;
+    group = b.dataset.g;
+    pickType(MEETING_GROUPS[group].types[0]);
+  });
   const paintTypes = () => {
     types.innerHTML = "";
     $("#mtgTitleH").textContent = heading();
-    for (const [g, grp] of Object.entries(MEETING_GROUPS)) {
-    const line = document.createElement("div");
-    line.className = "mtg-tline";
-    const lab = document.createElement("span");
-    lab.className = "mtg-tgrp";
-    lab.textContent = grp.label;
-    line.appendChild(lab);
-    types.appendChild(line);
-    for (const k of grp.types) {
+    $("[data-grp]").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.g === group));
+    for (const k of MEETING_GROUPS[group].types) {
       const t = MEETING_TYPES[k];
       const b = document.createElement("button");
       b.type = "button";
       b.className = `mtg-type${cur.type === k ? " on" : ""}`;
+      b.setAttribute("aria-pressed", String(cur.type === k));
       b.innerHTML = `<i></i>${t.label}`;
       b.querySelector("i").style.background = t.color;
       if (cur.type === k) { b.style.borderColor = t.color; b.style.background = rgba(t.color, 0.18); }
-      b.addEventListener("click", () => {
-        const auto = !cur.title || Object.values(MEETING_TYPES).some((x) => x.label === cur.title);
-        cur.type = k;
-        if (auto) { cur.title = k === "outro" ? "" : t.label; $("[data-title]").value = cur.title; }
-        paintTypes(); paintJira(); pickCategory();
-      });
-      line.appendChild(b);
-    }
+      b.addEventListener("click", () => pickType(k));
+      types.appendChild(b);
     }
   };
   const paintDur = () => { $(".mtg-dur").textContent = `${fmtMin(cur.end - cur.start)}${cache.settings.goal ? " que contam na meta do dia" : ""}`; paintJira(); };
@@ -261,15 +284,16 @@ export function openMeetingModal(m, { onDone } = {}) {
   }
   /* categoria do Jira: o tipo escolhido sugere a opção; a pessoa pode trocar */
   const catSel = $("[data-cat]");
+  const cs = () => catOf(cur.project);
   let catTouched = !!cur.categoryId;
   function pickCategory() {
-    if (catTouched || !catState.options) return;
-    const o = catState.options.find((x) => x.type === cur.type);
+    if (catTouched || !cs().options) return;
+    const o = cs().options.find((x) => x.type === cur.type);
     cur.categoryId = o ? o.id : "";
     catSel.value = cur.categoryId;
   }
   function paintCategory() {
-    const st = catState;
+    const st = cs();
     $("[data-cat-wrap]").hidden = !st.options?.length;
     $("[data-cat-note]").textContent = st.loading ? "Lendo as categorias do Jira…"
       : st.error ? `Não deu para ler o campo Categoria: ${st.error}`
@@ -283,12 +307,13 @@ export function openMeetingModal(m, { onDone } = {}) {
   }
   catSel.addEventListener("change", (e) => { cur.categoryId = e.target.value; catTouched = true; });
   function loadCategories() {
-    if (catState.loaded || catState.loading || !api.send) { paintCategory(); return; }
-    catState.loading = true; paintCategory();
-    api.send("MEETING_CATEGORY_OPTIONS", { project: api.project })
-      .then((r) => Object.assign(catState, { fieldId: r.fieldId, options: r.options || [], error: null }))
-      .catch((e) => Object.assign(catState, { error: e.message }))
-      .finally(() => { catState.loading = false; catState.loaded = !catState.error; if (wrap.isConnected) paintCategory(); });
+    const st0 = cs();
+    if (st0.loaded || st0.loading || !api.send) { paintCategory(); return; }
+    st0.loading = true; paintCategory();
+    api.send("MEETING_CATEGORY_OPTIONS", { project: cur.project })
+      .then((r) => Object.assign(st0, { fieldId: r.fieldId, options: r.options || [], error: null }))
+      .catch((e) => Object.assign(st0, { error: e.message }))
+      .finally(() => { st0.loading = false; st0.loaded = !st0.error; if (wrap.isConnected) paintCategory(); });
   }
 
   function paintJira() {
@@ -297,9 +322,9 @@ export function openMeetingModal(m, { onDone } = {}) {
     $("[data-jira]").checked = !!cur.jira;
     $("[data-jira-fields]").hidden = !cur.jira;
     if (cur.jira && !linked) loadCategories();
-    $("[data-proj]").textContent = api.project ? `em ${api.project}` : "";
+    $("[data-proj-wrap]").hidden = !cur.project;
     sp.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === (cur.sp == null ? "" : String(cur.sp))));
-    $("[data-jira-note]").textContent = `Cria uma Tarefa${api.project ? ` em ${api.project}` : ""} atribuída a você e aponta ${fmtMin(cur.end - cur.start)} a partir das ${hhmm(cur.start)}.`;
+    $("[data-jira-note]").textContent = `Cria uma Tarefa${cur.project ? ` em ${cur.project}` : ""} atribuída a você e aponta ${fmtMin(cur.end - cur.start)} em ${brDay(cur.date)} a partir das ${hhmm(cur.start)}.`;
     const lk = $("[data-linked]");
     lk.innerHTML = "";
     if (linked) {
@@ -314,6 +339,22 @@ export function openMeetingModal(m, { onDone } = {}) {
     $("[data-save]").textContent = cur.jira && !linked ? "Salvar e criar no Jira" : "Salvar";
   }
   $("[data-jira]").addEventListener("change", (e) => { cur.jira = e.target.checked; paintJira(); });
+  /* Projeto da demanda: MEED ou SUS (começa no Espaço/projeto padrão) */
+  const projSel = $("[data-proj]");
+  for (const pk of projects) projSel.append(new Option(pk, pk));
+  projSel.value = cur.project || "";
+  projSel.addEventListener("change", (e) => {
+    cur.project = e.target.value; catTouched = false; cur.categoryId = "";
+    paintJira(); paintCategory();
+  });
+  /* Dia: muda o dia da atividade (ex.: lançar ontem); as datas do Jira acompanham se estavam iguais */
+  $("[data-date]").value = cur.date;
+  $("[data-date]").addEventListener("change", (e) => {
+    const v = e.target.value; if (!v) return;
+    if (cur.startDate === cur.date) { cur.startDate = v; $("[data-sdate]").value = v; }
+    if (cur.dueDate === cur.date) { cur.dueDate = v; $("[data-ddate]").value = v; }
+    cur.date = v; paintJira();
+  });
   $("[data-sdate]").addEventListener("change", (e) => { cur.startDate = e.target.value || cur.date; });
   $("[data-ddate]").addEventListener("change", (e) => { cur.dueDate = e.target.value || cur.date; });
   $("[data-status]").addEventListener("change", (e) => { cur.status = e.target.value; });
@@ -367,13 +408,21 @@ export function openMeetingModal(m, { onDone } = {}) {
       b.addEventListener("click", () => {
         Object.assign(cur, { tpl: t.id, type: t.type, title: t.title || t.name, desc: t.desc || "", sp: t.sp ?? null, status: t.status || "done",
           jira: !!t.jira, end: Math.min(24 * 60, cur.start + Math.max(5, Number(t.dur) || 30)) });
+        group = groupOfType(cur.type);
         paintTpls(); fill();
       });
       tpls.appendChild(b);
     }
+    const n = $("[data-tpl-n]"); if (n) n.textContent = String(cache.settings.templates.length);
     if (!cache.settings.templates.length) tpls.innerHTML = `<span class="muted xs">Nenhum modelo. Preencha abaixo e use “Salvar como modelo”.</span>`;
   }
   paintTpls();
+  $("[data-side-tog]")?.addEventListener("click", (e) => {
+    sideOpen = !sideOpen;
+    $(".mtg-box").classList.toggle("side-open", sideOpen);
+    e.currentTarget.setAttribute("aria-expanded", String(sideOpen));
+    try { localStorage.setItem("qf.mtgSide", sideOpen ? "1" : "0"); } catch { /* sem storage */ }
+  });
   $("[data-tpl-edit]")?.addEventListener("click", () => {
     const url = chrome.runtime.getURL("options.html#modelos");
     try { chrome.tabs.create({ url }); } catch { window.open(url, "_blank"); }
@@ -405,12 +454,13 @@ export function openMeetingModal(m, { onDone } = {}) {
       btn.disabled = true; btn.textContent = "Criando no Jira…";
       try {
         const res = await api.send("CREATE_MEETING_ISSUE", {
+          project: cur.project || api.project,
           title: item.title, desc: item.desc, date: item.date, start: item.start, end: item.end,
           startDate: item.startDate || item.date, dueDate: item.dueDate || item.date, storyPoints: item.sp, status: item.status,
           categoryId: item.categoryId || "",
         });
         Object.assign(item, { jiraKey: res.key, jiraUrl: res.url, logged: res.logged || 0, jiraOk: res.ok,
-          category: catState.options?.find((o) => o.id === item.categoryId)?.value || "" });
+          category: cs().options?.find((o) => o.id === item.categoryId)?.value || "" });
         if (!res.ok) item.jiraIssues = (res.steps || []).filter((x) => x.ok === false).map((x) => `${x.step}: ${x.detail || "falhou"}`);
       } catch (err) {
         btn.disabled = false; paintJira();
@@ -433,7 +483,7 @@ export function openMeetingModal(m, { onDone } = {}) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Coloca as reuniões do dia na linha do tempo e a bolinha de marcar.
+ * Coloca as reuniões e atividades do dia na linha do tempo e a bolinha de marcar.
  * @param tr  retorno de track(): { track, lo, hi }
  * @param opts { date, now (minutos, só hoje), onChange, readOnly (só mostra, sem bolinhas),
  *               list + who (reuniões de outra pessoa da equipe, só leitura) }
@@ -512,7 +562,7 @@ export function attachMeetings(tr, { date, now = null, onChange, readOnly = fals
   add.className = "mtg-add";
   add.style.left = pct(start0);
   add.title = "Arraste até o horário e solte para marcar uma reunião, alinhamento ou atividade";
-  add.setAttribute("aria-label", "Marcar reunião na linha do tempo");
+  add.setAttribute("aria-label", "Marcar reunião ou atividade na linha do tempo");
   add.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
   let at = start0;
   const clampAdd = (v) => Math.max(lo, Math.min(tr.hi - 5, v));
@@ -525,18 +575,49 @@ export function attachMeetings(tr, { date, now = null, onChange, readOnly = fals
   t.appendChild(add);
 }
 
-/** Card "Reuniões do dia" com a lista e o botão de editar. */
+/** Filtro do card (Todas | Reuniões | Execução), lembrado entre as abas e as vezes. */
+let cardGroup = "all";
+try { cardGroup = localStorage.getItem("qf.mtgCardGroup") || "all"; } catch { /* sem storage */ }
+
+/** Card "Atividades do dia": reuniões e execução marcadas na linha do tempo, com filtro por grupo. */
 export function meetingsCard(date, { onChange } = {}) {
-  const list = meetingsOn(date);
+  const all = meetingsOn(date);
   const card = document.createElement("div");
   card.className = "card mtg-card";
-  const total = list.reduce((s, m) => s + m.end - m.start, 0);
-  card.innerHTML = `<div class="card-t">Reuniões do dia<span>${list.length ? fmtMin(total) : ""}</span></div>`;
+  const sum = (arr) => arr.reduce((s, m) => s + m.end - m.start, 0);
+  const byGroup = Object.fromEntries(Object.keys(MEETING_GROUPS).map((g) => [g, all.filter((m) => groupOfType(m.type) === g)]));
+  if (cardGroup !== "all" && !byGroup[cardGroup]) cardGroup = "all";
+  const list = cardGroup === "all" ? all : byGroup[cardGroup];
+  card.innerHTML = `<div class="card-t">Atividades do dia<span></span></div>`;
+  card.querySelector(".card-t span").textContent = all.length ? fmtMin(sum(all)) : "";
+  if (all.length) {
+    // Todas | Reuniões 30m | Execução 2h: o mesmo filtro de grupos da Equipe
+    const bar = document.createElement("div");
+    bar.className = "seg mtg-card-seg";
+    bar.setAttribute("role", "group");
+    bar.setAttribute("aria-label", "Mostrar");
+    for (const [g, label] of [["all", "Todas"], ...Object.entries(MEETING_GROUPS).map(([g, x]) => [g, x.label])]) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = cardGroup === g ? "on" : "";
+      b.setAttribute("aria-pressed", String(cardGroup === g));
+      b.textContent = g === "all" ? label : `${label} ${fmtMin(sum(byGroup[g]))}`;
+      b.addEventListener("click", () => {
+        cardGroup = g;
+        try { localStorage.setItem("qf.mtgCardGroup", g); } catch { /* sem storage */ }
+        card.replaceWith(meetingsCard(date, { onChange }));
+      });
+      bar.appendChild(b);
+    }
+    card.appendChild(bar);
+  }
   if (!list.length) {
     const p = document.createElement("p");
     p.className = "muted xs";
     p.style.margin = "0";
-    p.textContent = cache.settings.dot ? "Nenhuma ainda. Arraste a bolinha + da linha do tempo até o horário da reunião." : "Nenhuma reunião marcada neste dia.";
+    p.textContent = all.length ? `Nenhuma ${cardGroup === "execucao" ? "atividade de execução" : "reunião"} neste dia.`
+      : cache.settings.dot ? "Nenhuma ainda. Arraste a bolinha + da linha do tempo até o horário da reunião ou da atividade."
+      : "Nenhuma reunião ou atividade marcada neste dia.";
     card.appendChild(p);
     return card;
   }

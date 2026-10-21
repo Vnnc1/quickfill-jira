@@ -2900,8 +2900,8 @@ async function relatesLinkType(cfg) {
  */
 async function createMeetingIssue(p = {}) {
   const cfg = await getConfig();
-  const project = String(p.project || cfg.defaultProject || "").toUpperCase();
-  if (!project) throw new Error("Defina o projeto padrão nas Opções para criar a demanda.");
+  // Mesmo projeto que o modal mostra ("em MEED"); sem nada nas Opções, o MEED de sempre.
+  const project = String(p.project || cfg.defaultProject || "MEED").toUpperCase();
   const summary = String(p.title || "").trim() || "Reunião";
   const minutes = Math.max(0, Math.round((p.end ?? 0) - (p.start ?? 0)));
   const type = await issueTypeByName(project, "Tarefa", cfg);
@@ -3147,7 +3147,7 @@ async function categoryField(cfg) {
 /** Opções do campo Categoria na Tarefa do projeto (para o modal de marcar), cada uma com o tipo que representa. */
 async function meetingCategoryOptions(p = {}) {
   const cfg = await getConfig();
-  const project = String(p.project || cfg.defaultProject || "").toUpperCase();
+  const project = String(p.project || cfg.defaultProject || "MEED").toUpperCase();
   const cat = await categoryField(cfg);
   if (!cat || !project) return { fieldId: null, options: [] };
   const type = await issueTypeByName(project, "Tarefa", cfg);
@@ -3547,6 +3547,7 @@ const HANDLERS = {
       baseUrl: String(cfg.baseUrl || "").replace(/\/+$/, ""),
       subtaskName: cfg.subtaskName,
       designProjects: splitList(cfg.designProjects).map((x) => x.toUpperCase()),
+      uxProject: uxProjectOf(cfg),
       qaPeople: parseDeployers(cfg.qaPeople, true),
       qaRejectCategories: cfg.qaRejectCategories,
       assignSelf: cfg.assignSelf,

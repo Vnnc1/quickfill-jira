@@ -18,7 +18,7 @@
 /** Grupos de tipos, na ordem em que aparecem nos filtros e no modal. */
 export const MEETING_GROUPS = {
   reunioes: { label: "Reuniões", types: ["alinhamento", "reuniao", "outro"] },
-  execucao: { label: "Execução", types: ["refinamento", "deploy", "config", "testes"] },
+  execucao: { label: "Execução", types: ["refinamento", "deploy", "config", "testes", "outroexec"] },
 };
 export const groupOfType = (type) => (MEETING_GROUPS.execucao.types.includes(type) ? "execucao" : "reunioes");
 

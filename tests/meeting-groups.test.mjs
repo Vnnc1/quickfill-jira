@@ -7,7 +7,7 @@ const t = (summary, category) => classifyIssue({ summary, category })?.type ?? n
 
 test("dois grupos: reuniões (com pessoas) e execução (trabalho individual longo)", () => {
   assert.deepEqual(MEETING_GROUPS.reunioes.types, ["alinhamento", "reuniao", "outro"]);
-  assert.deepEqual(MEETING_GROUPS.execucao.types, ["refinamento", "deploy", "config", "testes"]);
+  assert.deepEqual(MEETING_GROUPS.execucao.types, ["refinamento", "deploy", "config", "testes", "outroexec"]);
   for (const g of Object.values(MEETING_GROUPS)) for (const k of g.types) assert.ok(MEETING_TYPES[k], k);
   assert.equal(groupOfType("deploy"), "execucao");
   assert.equal(groupOfType("alinhamento"), "reunioes");
