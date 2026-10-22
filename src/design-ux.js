@@ -2,6 +2,7 @@
  * O modal.js chama initUx() com os helpers dele (send, toast, jiraLink…). */
 
 import { UX_COLS, UX_TYPES, DEMAND_FILTERS, uxBoard, uxHandoff, uxDemand, uxProgress, uxToday } from "./lib/uxboard.js";
+import { openExec } from "./lib/exec-view.js";
 
 const UX = { data: null, loading: null, front: "", demFilter: "client", closed: { done: true }, done: {}, skipped: [], q: {} };
 let D = null;   // helpers do modal
@@ -56,7 +57,7 @@ function keyEl(key, ux = true) {
   return k;
 }
 
-function row({ key, title, sub, ux = true, right = [], dim = false, figma = null }) {
+function row({ key, title, sub, ux = true, right = [], dim = false, figma = null, exec = null }) {
   const r = el("div", `ux-row${dim ? " dim" : ""}`);
   const body = el("div", "ux-body");
   const line = el("div", "ux-line");
@@ -65,6 +66,7 @@ function row({ key, title, sub, ux = true, right = [], dim = false, figma = null
   body.append(line);
   if (sub) body.append(el("div", "ux-sub", sub));
   r.append(body, ...right.filter(Boolean));
+  if (exec) r.append(execBtn({ key, title, ...exec }));
   if (figma) r.append(figmaBtn({ title, ...figma }));
   r.append(D.jiraLink(key, { label: "" }));
   return r;
@@ -189,6 +191,22 @@ function searchNote(box, n) {
 }
 
 const infoLine = (data) => `Espaço ${data.ux} · atualizado ${new Date(data.generatedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}${data.truncated ? " · lista cortada em 600" : ""}`;
+
+/* ---------- Execuções: tier list da demanda (lib/exec-view.js) ---------- */
+
+const EXEC_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6h10M10 12h10M10 18h10"/><path d="M3.5 6l1.2 1.2L7 5M3.5 12l1.2 1.2L7 11M3.5 18l1.2 1.2L7 17"/></svg>';
+const execOpts = (i) => ({ figma: typeof i.figma === "string" ? i.figma : "" });   // no quadro, figma é só a contagem de links
+const showExec = (key, title, figma) => openExec(D, { key, title, figma, onSaved: () => loadUx({ force: true, render: D.rerender }) });
+
+/** Botão de ícone (linhas do Quadro e das Entregas) ou com texto (Hoje). */
+function execBtn({ key, title, figma = "", text = false }) {
+  const b = el("button", text ? "btn sm" : "ic ex-open", text ? "Execuções" : null);
+  if (!text) b.innerHTML = EXEC_ICON;
+  b.title = `Execuções de ${key}`;
+  b.setAttribute("aria-label", b.title);
+  b.addEventListener("click", (e) => { e.stopPropagation(); showExec(key, title, typeof figma === "string" ? figma : ""); });
+  return b;
+}
 
 /* ---------- Figma: botão de olho e modal (Visualizar · Protótipo navegável) ---------- */
 
@@ -410,7 +428,7 @@ export function renderUxBoard(box) {
         const sub = [i.front, i.assignee ? i.assignee.name : "sem responsável",
           col.id === "done" ? `feito ${brDate(i.doneAt)}${i.spent ? ` · ${fmtH(i.spent)}` : ""}` : i.spent ? `${fmtH(i.spent)} apontadas` : "",
           (i.links || []).length ? `→ ${i.links.map((l) => l.key).join(", ")}` : ""].filter(Boolean).join(" · ");
-        c.append(row({ key: i.key, title: i.summary, sub, right: [chip(i.t), age(i.age, col.id === "done" ? "var(--ok)" : null)], figma: figOf(i) }));
+        c.append(row({ key: i.key, title: i.summary, sub, right: [chip(i.t), age(i.age, col.id === "done" ? "var(--ok)" : null)], figma: figOf(i), exec: execOpts(i) }));
       }
     }
     box.append(c);
@@ -448,7 +466,8 @@ export function renderUxDeliveries(box) {
       body.append(top, el("div", "ux-sub", [r.hu.status.name, r.link, r.ux.doneAt ? `protótipo feito em ${brDate(r.ux.doneAt)}` : r.ux.status.name].filter(Boolean).join(" · ")));
       line.append(body);
       if (r.age) line.append(age(r.age));
-      line.append(figmaBtn({ title: r.hu.summary || r.ux.summary, key: r.ux.key, keys: [r.ux.key, r.hu.key], has: !!r.ux.figma }), D.jiraLink(r.hu.key, { label: "" }));
+      line.append(execBtn({ key: r.ux.key, title: r.ux.summary || r.hu.summary, ...execOpts(r.ux) }),
+        figmaBtn({ title: r.hu.summary || r.ux.summary, key: r.ux.key, keys: [r.ux.key, r.hu.key], has: !!r.ux.figma }), D.jiraLink(r.hu.key, { label: "" }));
       c.append(line);
     }
     box.append(c);
@@ -529,7 +548,7 @@ export function renderUxToday(box) {
     const did = UX.done[`done:${i.key}`];
     const btn = actBtn(did ? "Feito ✓" : "Mover para Feito", () => act({ op: "done", key: i.key }, () => { UX.done[`done:${i.key}`] = 1; }), { pri: true });
     if (did) btn.disabled = true;
-    c1.append(row({ key: i.key, title: i.summary, sub: [`desde ${brDate(i.statusAt)}`, i.spent ? `${fmtH(i.spent)} apontadas` : "", i.due ? `vence ${i.due.slice(8, 10)}/${i.due.slice(5, 7)}` : ""].filter(Boolean).join(" · "), right: [chip(i.t), btn], figma: figOf(i) }));
+    c1.append(row({ key: i.key, title: i.summary, sub: [`desde ${brDate(i.statusAt)}`, i.spent ? `${fmtH(i.spent)} apontadas` : "", i.due ? `vence ${i.due.slice(8, 10)}/${i.due.slice(5, 7)}` : ""].filter(Boolean).join(" · "), right: [chip(i.t), execBtn({ key: i.key, title: i.summary, text: true, ...execOpts(i) }), btn], figma: figOf(i) }));
   }
   box.append(c1);
   if (t.arrived.length) {

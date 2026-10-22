@@ -328,9 +328,193 @@ function setMode(mode, { restoring = false } = {}) {
   saveViewSoon();
 }
 
+/* =====================================================================
+   Tarefa › fluxo da demanda: Item Pendente → Em Andamento → Concluído
+   O fluxo segue a categoria do status no Jira (a mesma do quadro); os botões aplicam a
+   transição. Horas, datas, status e pontos abrem no modal "Apontar e atualizar".
+   ===================================================================== */
+
+const FLOW = [
+  { cat: "new", label: "Item Pendente", go: "Voltar para Item Pendente", rx: /pendente|to ?do|fazer|backlog|aberto/i },
+  { cat: "indeterminate", label: "Em Andamento", go: "Iniciar", rx: /andamento|progress|fazendo|iniciar/i },
+  { cat: "done", label: "Concluído", go: "Concluir", rx: /conclu|done|feito|finaliz|fechad/i },
+];
+const flowIdx = (cat) => Math.max(0, FLOW.findIndex((f) => f.cat === cat));
+const flowTone = (cat) => (cat === "done" ? "done" : cat === "indeterminate" ? "doing" : "todo");
+
+/** Três traços na linha da lista: até onde a demanda já chegou. */
+function miniFlow(cat) {
+  const m = document.createElement("span");
+  m.className = `mflow ${flowTone(cat)}`;
+  const n = cat ? flowIdx(cat) : -1;
+  m.title = n < 0 ? "" : `Fluxo: ${FLOW[n].label}`;
+  m.setAttribute("aria-hidden", "true");
+  for (let i = 0; i < FLOW.length; i++) { const t = document.createElement("i"); if (i <= n) t.className = "on"; m.append(t); }
+  return m;
+}
+
+/** Atualiza o status da linha da lista com o que veio do Jira. */
+function syncRow(ctx) {
+  const row = (state.parent?.key === ctx.key && state.parent) || state.subtasks.find((x) => x.key === ctx.key);
+  if (!row || (row.status === ctx.status && row.statusCategory === ctx.statusCategory)) return;
+  Object.assign(row, { status: ctx.status, statusCategory: ctx.statusCategory });
+  renderSubtasks();
+}
+
+/** A transição que leva para a etapa (prefere a de nome parecido: "Concluir", "Em Andamento"…). */
+function transitionFor(ctx, stage) {
+  const list = (ctx.transitions || []).filter((t) => t.toCategory === stage.cat);
+  return list.find((t) => stage.rx.test(`${t.name} ${t.to}`)) || list[0] || null;
+}
+
+function renderDemandFlow(ctx) {
+  const box = $("demandFlow");
+  box.innerHTML = "";
+  const cur = flowIdx(ctx.statusCategory);
+  box.dataset.tone = flowTone(ctx.statusCategory);
+
+  const head = document.createElement("div");
+  head.className = "df-head";
+  const k = document.createElement("b");
+  k.className = "df-key";
+  k.textContent = ctx.key;
+  const sum = document.createElement("span");
+  sum.className = "df-sum";
+  sum.textContent = ctx.summary;
+  sum.title = ctx.summary;
+  head.append(k, sum, histLink(ctx.key, { label: "" }), jiraLink(ctx.key, { label: "" }));
+
+  const track = document.createElement("ol");
+  track.className = "df-track";
+  track.setAttribute("aria-label", `Fluxo de ${ctx.key}: ${FLOW[cur].label}`);
+  FLOW.forEach((f, i) => {
+    const li = document.createElement("li");
+    li.className = `df-st ${i < cur ? "past" : i === cur ? "now" : "next"}`;
+    if (i === cur) li.setAttribute("aria-current", "step");
+    const dot = document.createElement("i");
+    dot.className = "df-dot";
+    const b = document.createElement("b");
+    b.textContent = f.label;
+    const sm = document.createElement("small");
+    const same = String(ctx.status || "").toLowerCase() === f.label.toLowerCase();
+    sm.textContent = i === cur ? (same || !ctx.status ? "agora" : ctx.status) : i < cur ? "feito" : "";
+    li.append(dot, b, sm);
+    track.append(li);
+  });
+
+  const facts = document.createElement("p");
+  facts.className = "df-facts";
+  const c = ctx.current || {};
+  const fact = (label, value) => { if (!value) return; const sp = document.createElement("span"); sp.append(`${label} `); const v = document.createElement("b"); v.textContent = value; sp.append(v); facts.append(sp); };
+  fact("apontado", c.timeSpent || "0m");
+  fact("estimativa", c.originalEstimate || "sem");
+  if (c.dueDate) fact("vence", c.dueDate.split("-").reverse().slice(0, 2).join("/"));
+  if (c.storyPoints != null && c.storyPoints !== "") fact("pontos", String(c.storyPoints));
+  if (ctx.assigneeName) fact("com", ctx.assigneeName.split(" ")[0]);
+
+  const acts = document.createElement("div");
+  acts.className = "df-acts";
+  const apontar = document.createElement("button");
+  apontar.className = "btn primary";
+  apontar.id = "dfApply";
+  apontar.textContent = "Apontar e atualizar";
+  apontar.title = "Horas, quando, status, data limite e story points";
+  apontar.addEventListener("click", openApplyModal);
+  acts.append(apontar);
+  // próximas etapas primeiro; voltar fica por último, mais discreto
+  const order = [...FLOW.keys()].filter((i) => i > cur).concat([...FLOW.keys()].filter((i) => i < cur).reverse());
+  for (const i of order) {
+    const t = transitionFor(ctx, FLOW[i]);
+    if (!t) continue;
+    const back = i < cur;
+    const btn = document.createElement("button");
+    btn.className = `btn${back ? " ghost" : ""} df-move`;
+    btn.textContent = FLOW[i].go;
+    btn.title = `Mover ${ctx.key} para ${t.to || FLOW[i].label} no Jira`;
+    btn.addEventListener("click", () => moveDemand(ctx, t, FLOW[i], btn));
+    acts.append(btn);
+    if (back) break;   // um voltar basta
+  }
+  box.append(head, track, facts, acts);
+}
+
+async function moveDemand(ctx, t, stage, btn) {
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Movendo…";
+  try {
+    const res = await send("MOVE_ISSUE", { key: ctx.key, transitionId: t.id });
+    toast(`${ctx.key} agora está em ${res.status || stage.label}.`, "ok");
+    state.panel.data = null;
+    await selectSubtask(ctx.key);   // relê transições, status e o fluxo
+  } catch (e) {
+    toast(e.message);
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+/* ---------- modal "Apontar e atualizar" (o mesmo formulário do Lote, aberto por cima) ---------- */
+
+const AM = { open: false, home: null, next: null, opener: null };
+
+function amKey(e) {
+  if (e.key !== "Escape") return;
+  e.stopPropagation();
+  e.preventDefault();
+  closeApplyModal();
+}
+
+function openApplyModal() {
+  if (!state.selected || state.mode !== "single") return;
+  const f = $("formCard");
+  if (!AM.open) {
+    AM.home = f.parentNode;
+    AM.next = f.nextSibling;
+    AM.opener = document.activeElement;
+    $("amBody").append(f);
+  }
+  AM.open = true;
+  $("amTitle").textContent = `Apontar em ${state.selected.key}`;
+  $("amSub").textContent = state.selected.summary;
+  $("amApply").textContent = $("btnApply").textContent;
+  f.classList.remove("hidden");
+  $("applyModal").classList.remove("hidden");
+  document.addEventListener("keydown", amKey, true);
+  setTimeout(() => $("spent").focus(), 30);
+}
+
+function closeApplyModal() {
+  if (!AM.open) return;
+  const f = $("formCard");
+  AM.home.insertBefore(f, AM.next);
+  AM.open = false;
+  $("applyModal").classList.add("hidden");
+  f.classList.toggle("hidden", state.mode === "single");
+  document.removeEventListener("keydown", amKey, true);
+  (AM.opener && document.contains(AM.opener) ? AM.opener : $("dfApply"))?.focus();
+}
+
+$("amClose").addEventListener("click", closeApplyModal);
+$("amCancel").addEventListener("click", closeApplyModal);
+$("applyModal").addEventListener("mousedown", (e) => { if (e.target === $("applyModal")) closeApplyModal(); });
+$("amApply").addEventListener("click", async () => {
+  const key = state.selected?.key;
+  $("amApply").disabled = true;
+  try {
+    const res = await apply();
+    if (!res) return;
+    closeApplyModal();
+    if (key) await selectSubtask(key);   // status e horas novos no fluxo
+  } finally { $("amApply").disabled = false; }
+});
+
 function showForm(on) {
-  $("formCard").classList.toggle("hidden", !on);
-  $("actionBar").classList.toggle("hidden", !on);
+  const single = state.mode === "single";
+  if (!single || !on) closeApplyModal();
+  $("demandFlow").classList.toggle("hidden", !(on && single));
+  $("formCard").classList.toggle("hidden", !on || (single && !AM.open));
+  $("actionBar").classList.toggle("hidden", !on || single);
 }
 
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => setMode(t.dataset.mode)));
@@ -666,6 +850,7 @@ function renderSubtasks() {
     b.querySelector(".k").textContent = s.key;
     b.querySelector(".s").textContent = s.summary;
     b.querySelector(".st").textContent = s.status;
+    b.querySelector(".st").before(miniFlow(s.statusCategory));
     if (s.mine) {
       const you = document.createElement("span");
       you.className = "tag-you";
@@ -704,6 +889,7 @@ async function selectSubtask(key) {
   try {
     const ctx = await send("LOAD_SUBTASK", { key });
     state.selected = ctx;
+    syncRow(ctx);
     applySingleContext(ctx);
     if (!ctx.canEditTimeTracking) toast("Aviso: o controle de tempo não está editável nesta issue.", "info");
     touch();
@@ -747,6 +933,7 @@ function applySingleContext(ctx, override = null, { keepValues = false } = {}) {
 
   $("btnApply").textContent = state.parent && ctx.key === state.parent.key ? "Aplicar na tarefa" : "Aplicar na subtarefa";
   $("btnApply").disabled = false;
+  renderDemandFlow(ctx);
   showForm(true);
   document.querySelectorAll("#subtaskList .item").forEach((el) => el.classList.toggle("sel", el.dataset.key === ctx.key));
   refreshWorkday({ delay: 0 });
@@ -3251,7 +3438,9 @@ async function applySingle() {
     toast(res.ok ? `${res.key} atualizada.` : `${res.key}: algumas etapas falharam.`, res.ok ? "ok" : "err");
     await afterApply();
     touch();
+    return res;
   } catch (e) { toast(e.message); } finally { busy(false); }
+  return null;
 }
 
 async function applyBatch() {

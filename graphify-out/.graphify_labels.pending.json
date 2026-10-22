@@ -1,0 +1,18 @@
+{
+  "9": "setMode",
+  "14": "send",
+  "15": "period.js",
+  "16": "note",
+  "17": "close",
+  "19": "connectionKey",
+  "24": "searchIssues",
+  "28": "inSpace",
+  "36": "saveView",
+  "37": "renderSprints",
+  "38": "paintSprintPick",
+  "39": "uxApplyViewState",
+  "40": "applyScale",
+  "41": "applyViewAfter",
+  "42": "enhanceCards",
+  "43": "withScrumDefaults"
+}

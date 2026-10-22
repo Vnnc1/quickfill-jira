@@ -65,6 +65,8 @@ npm run status                            # versão de cada perfil e quais têm 
 npm run release -- dev -m "o que mudou"   # lança só o DEV (4.8.2 → 4.8.3)
 ```
 
+Os contratos de cache, transporte e paginação, as correções investigadas com Graphify e os pontos para futuras refatorações estão em [Investigação técnica do QuickFill](specs/quickfill_reverse_spec.md).
+
 ### Lançar uma versão
 
 1. `npm run status` mostra quais perfis mudaram desde a última versão publicada.

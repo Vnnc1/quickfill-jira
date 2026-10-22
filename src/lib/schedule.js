@@ -125,14 +125,14 @@ export function buildPlan({ startDate, items, busyByDay = {}, workday = DEFAULT_
 
   const result = [];
   let cursorDate = startDate;
+  let daysAdvanced = 0;
   let unplaced = 0;
 
   for (const item of items) {
     let remaining = Math.max(0, Math.round(item.minutes || 0));
     const chunks = [];
-    let guard = 0;
 
-    while (remaining > 0 && guard < maxDays) {
+    while (remaining > 0 && daysAdvanced < maxDays) {
       const d = day(cursorDate);
       const capLeft = wd.capMinutes - used(d);
       const skip = (wd.skipWeekends && d.weekend) || capLeft <= 0;
@@ -162,7 +162,7 @@ export function buildPlan({ startDate, items, busyByDay = {}, workday = DEFAULT_
 
       if (remaining > 0) {
         cursorDate = addDays(cursorDate, 1);
-        guard += 1;
+        daysAdvanced += 1;
       }
     }
 

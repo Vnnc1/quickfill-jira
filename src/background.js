@@ -3,6 +3,9 @@ import { buildPlan, parseHM, addDays, fmtHM, fmtDur, DEFAULT_WORKDAY } from "./l
 import { ROLE, UPDATE_URL } from "./lib/role.js";
 import { stageFrom, termsRx, normName } from "./lib/teamstats.js";
 import { classifyIssue, categoryText, meetingTypeOf } from "./lib/meeting-detect.js";
+import { createJiraClient } from "./lib/jira-client.js";
+import { searchIssues } from "./lib/jira-search.js";
+import { createAsyncCache, connectionKey } from "./lib/async-cache.js";
 
 /* ------------------------------------------------------------------ */
 /* Configuração                                                        */
@@ -116,68 +119,11 @@ function assertConfigured(cfg) {
 /* Cliente REST                                                        */
 /* ------------------------------------------------------------------ */
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Chamada à API do Jira com nova tentativa automática quando o Jira pede para
- * esperar (429) ou está instável (502/503/504). Antes, essas respostas viravam
- * erro e a tarefa sumia das somas da Equipe sem ninguém perceber.
- * POST/PUT só repetem em 429 — que garante que nada foi gravado.
- */
-/**
- * Freio do limite de uso: quando o Jira responde 429, todas as chamadas seguintes (não só a que
- * levou o 429) esperam o tempo pedido. Assim as leituras em paralelo não continuam batendo no limite.
- */
-let _rateLimitedUntil = 0;
-const RATE_WAIT_MAX_MS = 30 * 1000;
-
-async function jira(path, { method = "GET", body, cfg, retries = 4 } = {}) {
-  const conf = cfg || (await getConfig());
-  assertConfigured(conf);
-
-  for (let attempt = 0; ; attempt++) {
-    const wait = _rateLimitedUntil - Date.now();
-    if (wait > 0) await sleep(Math.min(wait, RATE_WAIT_MAX_MS));
-    const res = await fetch(`${conf.baseUrl}${path}`, {
-      method,
-      headers: {
-        Authorization: "Basic " + btoa(`${conf.email}:${conf.apiToken}`),
-        Accept: "application/json",
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-
-    const retryable = res.status === 429 || (method === "GET" && [502, 503, 504].includes(res.status));
-    if (res.status === 429) {
-      // Retry-After em segundos; sem ele, espera crescente (2 s, 4 s, 8 s…)
-      const after = Number(res.headers?.get?.("Retry-After"));
-      const ms = after > 0 ? after * 1000 : 2000 * 2 ** attempt;
-      _rateLimitedUntil = Math.max(_rateLimitedUntil, Date.now() + Math.min(ms, RATE_WAIT_MAX_MS));
-    }
-    if (retryable && attempt < retries) {
-      if (res.status !== 429) await sleep(400 * 2 ** attempt + Math.random() * 200);
-      continue;   // no 429, a espera fica no início da próxima volta (vale para todas as chamadas)
-    }
-
-    if (res.status === 204) return null;
-
-    const text = await res.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch { /* resposta não-JSON */ }
-
-    if (!res.ok) {
-      const detail =
-        data?.errorMessages?.join(" | ") ||
-        (data?.errors && Object.entries(data.errors).map(([k, v]) => `${k}: ${v}`).join(" | ")) ||
-        text.slice(0, 300) ||
-        res.statusText;
-      const err = new Error(`Jira ${res.status}: ${detail}`);
-      err.status = res.status;
-      throw err;
-    }
-    return data;
-  }
+const jiraRequest = createJiraClient();
+async function jira(path, options = {}) {
+  const cfg = options.cfg || await getConfig();
+  assertConfigured(cfg);
+  return jiraRequest(path, { ...options, cfg });
 }
 
 /* ------------------------------------------------------------------ */
@@ -312,6 +258,7 @@ async function loadIssueTree(rawKey) {
       key: s.key,
       summary: s.fields?.summary || "",
       status: s.fields?.status?.name || "",
+      statusCategory: s.fields?.status?.statusCategory?.key || "",
       assignee: a ? { id: a.accountId, name: a.displayName } : null,
       mine: !!(a && me && a.accountId === me.accountId),
     };
@@ -323,9 +270,10 @@ async function loadIssueTree(rawKey) {
       summary: issue.fields?.summary || "",
       isSubtask,
       status: issue.fields?.status?.name || "",
+      statusCategory: issue.fields?.status?.statusCategory?.key || "",
     },
     subtasks: isSubtask
-      ? [{ key: issue.key, summary: issue.fields?.summary || "", status: issue.fields?.status?.name || "" }]
+      ? [{ key: issue.key, summary: issue.fields?.summary || "", status: issue.fields?.status?.name || "", statusCategory: issue.fields?.status?.statusCategory?.key || "" }]
       : subtasks,
   };
 }
@@ -365,6 +313,7 @@ async function loadSubtaskContext(rawKey) {
     key: issue.key,
     summary: issue.fields?.summary || "",
     status: issue.fields?.status?.name || "",
+    statusCategory: issue.fields?.status?.statusCategory?.key || "",   // new · indeterminate · done (o fluxo da aba Tarefa)
     parentKey: issue.fields?.parent?.key || null,
     parentSummary: issue.fields?.parent?.fields?.summary || "",
     assigneeId: issue.fields?.assignee?.accountId || null,
@@ -634,11 +583,12 @@ async function listBoards(payload = {}) {
 const _boardConfigCache = new Map();
 
 /** Colunas do quadro, cada uma com os ids de status que ela agrupa. */
-async function getBoardColumns(payload) {
-  const cfg = await getConfig();
+async function getBoardColumns(payload, cfg) {
+  cfg ||= await getConfig();
   const boardId = payload.boardId;
   if (!boardId) throw new Error("Selecione um quadro.");
-  if (!payload.refresh && _boardConfigCache.has(boardId)) return _boardConfigCache.get(boardId);
+  const cacheKey = JSON.stringify([connectionKey(cfg), String(boardId)]);
+  if (!payload.refresh && _boardConfigCache.has(cacheKey)) return _boardConfigCache.get(cacheKey);
 
   const conf = await jira(`/rest/agile/1.0/board/${encodeURIComponent(boardId)}/configuration`, { cfg });
 
@@ -653,7 +603,7 @@ async function getBoardColumns(payload) {
     filterId: conf?.filter?.id ? String(conf.filter.id) : null,
     columns,
   };
-  _boardConfigCache.set(boardId, entry);
+  _boardConfigCache.set(cacheKey, entry);
   return entry;
 }
 
@@ -755,52 +705,18 @@ async function searchByColumns(payload) {
  * e cai para o clássico (`/search`, com startAt) em instâncias que ainda não o têm.
  */
 async function runJql(jql, fields, max, cfg) {
-  const out = [];
-
-  try {
-    let token = null;
-    do {
-      const page = await jira("/rest/api/3/search/jql", {
-        method: "POST",
-        cfg,
-        body: { jql, fields, maxResults: Math.min(100, max - out.length), ...(token ? { nextPageToken: token } : {}) },
-      });
-      out.push(...(page?.issues || []));
-      token = page?.nextPageToken || null;
-    } while (token && out.length < max);
-    return out.slice(0, max);
-  } catch (e) {
-    if (!/40[45]/.test(e.message)) throw e;   // erro real de JQL/permissão: propaga
-  }
-
-  // Fallback: endpoint clássico
-  let startAt = 0;
-  for (;;) {
-    const qs = new URLSearchParams({
-      jql,
-      startAt: String(startAt),
-      maxResults: String(Math.min(100, max - out.length)),
-      fields: fields.join(","),
-    });
-    const page = await jira(`/rest/api/3/search?${qs}`, { cfg });
-    const batch = page?.issues || [];
-    out.push(...batch);
-    startAt += batch.length;
-    if (!batch.length || out.length >= max || startAt >= (page?.total ?? 0)) break;
-  }
-  return out.slice(0, max);
+  return searchIssues(jira, { jql, fields, max, cfg });
 }
 
 /* ------------------------------------------------------------------ */
 /* Criação de subtarefa                                                */
 /* ------------------------------------------------------------------ */
 
-/** Quem sou eu no Jira. Cacheado enquanto o service worker viver. */
-let _myself = null;
+/** Identidade isolada por conexão, com compartilhamento de leituras simultâneas. */
+const _myself = createAsyncCache({ ttlMs: 60 * 60 * 1000, maxEntries: 4 });
 async function getMyself(cfg) {
-  if (_myself) return _myself;
-  _myself = await jira("/rest/api/3/myself", { cfg });
-  return _myself;
+  const conf = cfg || await getConfig();
+  return _myself.get(connectionKey(conf), () => jira("/rest/api/3/myself", { cfg: conf }));
 }
 
 /**
@@ -1011,8 +927,8 @@ function inlineWorklogs(issue) {
   return wl.worklogs;
 }
 
-const _busyCache = new Map();   // "from|to" -> { at, data }
 const BUSY_TTL_MS = 60 * 1000;
+const _busyCache = createAsyncCache({ ttlMs: BUSY_TTL_MS });
 
 /**
  * Seus apontamentos entre duas datas, agrupados por dia:
@@ -1021,13 +937,15 @@ const BUSY_TTL_MS = 60 * 1000;
  * 2) o /worklog de cada uma traz os horários, filtrados pelo seu accountId.
  */
 async function fetchMyBusy(from, to, cfg, { force = false } = {}) {
-  const cacheKey = `${from}|${to}`;
-  const hit = _busyCache.get(cacheKey);
-  if (!force && hit && Date.now() - hit.at < BUSY_TTL_MS) return hit.data;
+  const cacheKey = JSON.stringify([connectionKey(cfg), from, to]);
+  return _busyCache.get(cacheKey, () => loadMyBusy(from, to, cfg), { force });
+}
 
+async function loadMyBusy(from, to, cfg) {
   const me = await getMyself(cfg);
   const jql = `worklogAuthor = currentUser() AND worklogDate >= "${from}" AND worklogDate <= "${to}"`;
-  const issues = await runJql(jql, ["summary", "status", "parent", "worklog"], 300, cfg);
+  const issues = await runJql(jql, ["summary", "status", "parent", "worklog"], 1000, cfg);
+  if (issues.length >= 1000) throw new Error("Há muitas demandas no período para conferir todos os apontamentos. Reduza o período e tente novamente.");
 
   const [fy, fm, fd] = from.split("-").map(Number);
   const [ty, tm, td] = addDays(to, 1).split("-").map(Number);
@@ -1056,7 +974,7 @@ async function fetchMyBusy(from, to, cfg, { force = false } = {}) {
     if (inline) inline.forEach((w) => push(iss, w));
     else truncated.push(iss);
   }
-  await mapLimit(truncated, 6, async (iss) => {
+  const results = await mapLimit(truncated, 6, async (iss) => {
     let startAt = 0;
     for (;;) {
       const page = await jira(
@@ -1070,11 +988,17 @@ async function fetchMyBusy(from, to, cfg, { force = false } = {}) {
     }
   });
 
-  _busyCache.set(cacheKey, { at: Date.now(), data: byDay });
+  const failed = results.filter((r) => !r.ok);
+  if (failed.length) {
+    throw new Error(`Não foi possível conferir os apontamentos de ${failed.length} demanda(s): ${failed[0].error}`);
+  }
   return byDay;
 }
 
-const clearBusyCache = () => _busyCache.clear();
+const clearBusyCache = () => {
+  _busyCache.clear();
+  _myDemands.clear();
+};
 
 /**
  * Plano de apontamento: encaixa cada item na jornada, depois do que já está
@@ -1337,6 +1261,7 @@ async function applySingle(payload) {
       items: [{ key: payload.key, minutes: spent.minutes }],
       force: true,
     });
+    if (plan.busyError) throw new Error(`Não foi possível conferir os horários ocupados. Nenhuma alteração foi enviada. ${plan.busyError}`);
     if (plan.unplaced) {
       throw new Error(plan.workday.overflow === "sameDay"
         ? `Não cabe no dia: ${fmtDur(plan.unplaced)} passariam da meia-noite. Ajuste o horário ou o tempo.`
@@ -1990,6 +1915,7 @@ async function applyBatch(payload) {
       items: targets.map((t) => ({ key: t.key, minutes: spent.minutes })),
       force: true,
     });
+    if (plan.busyError) throw new Error(`Não foi possível conferir os horários ocupados. Nenhuma alteração foi enviada. ${plan.busyError}`);
     if (plan.unplaced) {
       throw new Error(plan.workday.overflow === "sameDay"
         ? `O lote não cabe no dia: ${fmtDur(plan.unplaced)} passariam da meia-noite. Reduza o tempo por subtarefa ou a quantidade selecionada.`
@@ -2079,7 +2005,7 @@ async function testConnection() {
 /* Status, colunas dos quadros e histórico (usados pelo QuickFill DEV)  */
 /* ------------------------------------------------------------------ */
 
-let _statusMeta = null;
+const _statusMeta = createAsyncCache({ ttlMs: 10 * 60 * 1000, maxEntries: 4 });
 
 const QA_RX = /valida|homolog|teste|\bqa\b|review|revis/i;
 const DEPLOY_RX = /deploy|produ[cç]|publica|release|libera/i;
@@ -2120,18 +2046,19 @@ function columnKind(name, R = stageRules()) {
 const _spacesCache = { at: 0, data: null };
 
 async function statusMeta(cfg) {
-  if (_statusMeta) return _statusMeta;
-  const all = await jira("/rest/api/3/status", { cfg });
-  _statusMeta = {};
-  for (const st of all || []) {
-    _statusMeta[String(st.id)] = { name: st.name, cat: st.statusCategory?.key || "indeterminate" };
-  }
-  return _statusMeta;
+  return _statusMeta.get(connectionKey(cfg), async () => {
+    const all = await jira("/rest/api/3/status", { cfg });
+    return Object.fromEntries((all || []).map((st) => [String(st.id), {
+      name: st.name, cat: st.statusCategory?.key || "indeterminate",
+    }]));
+  });
 }
 
 /** Espaços acompanhados (MEED e SUS) com os status de validação e de deploy de cada um. */
 async function qaSpaces(cfg, meta) {
-  const sig = [cfg.stageFeito, cfg.stageDeploy, cfg.stagePrd, cfg.stageQa, cfg.stageReopen, cfg.stageValidated, cfg.stageBlocked, cfg.statusColumns, cfg.sustColumns].join("|");
+  const sig = JSON.stringify([connectionKey(cfg), cfg.defaultProject, cfg.sustProject, cfg.batchBoardId, cfg.sustBoardId,
+    cfg.stageFeito, cfg.stageDeploy, cfg.stagePrd, cfg.stageQa, cfg.stageReopen, cfg.stageValidated, cfg.stageBlocked,
+    cfg.statusColumns, cfg.sustColumns]);
   if (_spacesCache.data && _spacesCache.sig === sig && Date.now() - _spacesCache.at < 10 * 60 * 1000) return _spacesCache.data;
   const data = await qaSpacesLoad(cfg, meta);
   _spacesCache.sig = sig;
@@ -2158,7 +2085,7 @@ async function qaSpacesLoad(cfg, meta) {
         boardId = b?.id;
       }
       if (boardId) {
-        const conf = await getBoardColumns({ boardId: String(boardId) });
+        const conf = await getBoardColumns({ boardId: String(boardId) }, cfg);
         out.board = { id: conf.boardId, name: conf.name };
         for (const c of conf.columns) {
           const kind = columnKind(c.name, R);
@@ -2192,30 +2119,7 @@ async function qaSpacesLoad(cfg, meta) {
 
 /** Busca com changelog; tenta o endpoint novo e cai para o clássico. */
 async function searchWithChangelog(jql, fields, max, cfg) {
-  const out = [];
-  try {
-    let token = null;
-    do {
-      const page = await jira("/rest/api/3/search/jql", {
-        method: "POST", cfg,
-        body: { jql, fields, expand: "changelog", maxResults: Math.min(100, max - out.length), ...(token ? { nextPageToken: token } : {}) },
-      });
-      out.push(...(page?.issues || []));
-      token = page?.nextPageToken || null;
-    } while (token && out.length < max);
-    return out.slice(0, max);
-  } catch (e) {
-    if (!/40[45]/.test(e.message)) throw e;
-  }
-  for (let startAt = 0; out.length < max; ) {
-    const qs = new URLSearchParams({ jql, startAt: String(startAt), maxResults: "100", fields: fields.join(","), expand: "changelog" });
-    const page = await jira(`/rest/api/3/search?${qs}`, { cfg });
-    const batch = page?.issues || [];
-    out.push(...batch);
-    startAt += batch.length;
-    if (!batch.length || startAt >= (page?.total ?? 0)) break;
-  }
-  return out.slice(0, max);
+  return searchIssues(jira, { jql, fields, max, cfg, expand: "changelog" });
 }
 
 async function fullChangelog(key, cfg) {
@@ -2289,16 +2193,16 @@ async function issueHistory(p = {}) {
 /* QuickFill DEV — minhas demandas                                     */
 /* ------------------------------------------------------------------ */
 
-const _myDemands = { key: "", at: 0, data: null, pending: null };
-let _priorities = null;
+const _myDemands = createAsyncCache({ ttlMs: 90 * 1000, maxEntries: 8 });
+const _priorities = createAsyncCache({ ttlMs: 10 * 60 * 1000, maxEntries: 4 });
 
 async function priorityList(cfg) {
-  if (_priorities) return _priorities;
   try {
-    const list = await jira("/rest/api/3/priority", { cfg });
-    _priorities = (list || []).map((p, i) => ({ id: String(p.id), name: p.name, rank: i, color: p.statusColor || null }));
-  } catch { _priorities = []; }
-  return _priorities;
+    return await _priorities.get(connectionKey(cfg), async () => {
+      const list = await jira("/rest/api/3/priority", { cfg });
+      return (list || []).map((p, i) => ({ id: String(p.id), name: p.name, rank: i, color: p.statusColor || null }));
+    });
+  } catch { return []; } // a leitura seguinte tenta de novo, sem guardar a falha
 }
 
 async function myDemands(p = {}) {
@@ -2306,11 +2210,8 @@ async function myDemands(p = {}) {
   const days = Math.max(1, Math.min(60, Number(p.days) || 30));
   const today = todayLocal();
   const from = addDays(today, -(days - 1));
-  const key = `${from}`;
-  if (!p.force && _myDemands.data && _myDemands.key === key && Date.now() - _myDemands.at < 90 * 1000) return _myDemands.data;
-  if (_myDemands.pending && _myDemands.key === key) return _myDemands.pending;
-  _myDemands.key = key;
-  _myDemands.pending = (async () => {
+  const key = JSON.stringify([cfg, from, today]);
+  return _myDemands.get(key, async () => {
     const [meta, me, prios] = await Promise.all([statusMeta(cfg), getMyself(cfg), priorityList(cfg)]);
     const spaces = await qaSpaces(cfg, meta);
     const projects = spaces.map((s) => s.project);
@@ -2356,11 +2257,8 @@ async function myDemands(p = {}) {
       me: { accountId: me.accountId, name: me.displayName },
       spaces: spaces.map((s) => ({ project: s.project, kinds: s.kinds, board: s.board })),
       statuses: meta, priorities: prios, issues, truncated: raw.length >= 300 };
-    _myDemands.at = Date.now();
-    _myDemands.data = data;
     return data;
-  })();
-  try { return await _myDemands.pending; } finally { _myDemands.pending = null; }
+  }, { force: p.force });
 }
 
 /** Chaves das demandas de uma sprint (inclui encerradas) — para filtrar horas pela sprint. */
@@ -2638,16 +2536,7 @@ const uxProjectOf = (cfg) => String(cfg.uxProject || splitList(cfg.designProject
 const uxHuProjectOf = (cfg) => String(cfg.uxHuProject || cfg.defaultProject || "MEED").toUpperCase();
 
 async function searchPlain(jql, fields, max, cfg) {
-  const out = [];
-  let token = null;
-  do {
-    const page = await jira("/rest/api/3/search/jql", {
-      method: "POST", cfg, body: { jql, fields, maxResults: Math.min(100, max - out.length), ...(token ? { nextPageToken: token } : {}) },
-    });
-    out.push(...(page?.issues || []));
-    token = page?.nextPageToken || null;
-  } while (token && out.length < max);
-  return out;
+  return searchIssues(jira, { jql, fields, max, cfg });
 }
 
 const linkKeys = (links) => (links || []).map((l) => {
@@ -2742,6 +2631,16 @@ async function uxBoardData(p = {}) {
 }
 
 /** Primeira transição para a categoria pedida (doing evita "Aguardando…"). */
+/** Aba Tarefa › fluxo: aplica uma transição da demanda e devolve o status novo. */
+async function moveIssue(p = {}) {
+  const cfg = await getConfig();
+  const key = normalizeKey(p.key);
+  if (!p.transitionId) throw new Error("Escolha para onde mover a demanda.");
+  await jira(`/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, { method: "POST", cfg, body: { transition: { id: String(p.transitionId) } } });
+  const issue = await jira(`/rest/api/3/issue/${encodeURIComponent(key)}?fields=status`, { cfg });
+  return { key, status: issue.fields?.status?.name || "", statusCategory: issue.fields?.status?.statusCategory?.key || "" };
+}
+
 async function transitionTo(key, want, cfg) {
   const page = await jira(`/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, { cfg });
   const list = page?.transitions || [];
@@ -2819,6 +2718,120 @@ async function uxAction(p = {}) {
     return { key: created.key, url: `${cfg.baseUrl}/browse/${created.key}`, message: `${hu} clonada para o UX como ${created.key}, em Itens pendentes, ligada à HU${linkNote}.` };
   }
   throw new Error("Ação desconhecida.");
+}
+
+/* ------------------------------------------------------------------ */
+/* DESIGN — Execuções da demanda (tier list: Agora · Próximo · Depois · Aguardando · Feito) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * As execuções ficam numa propriedade da demanda (todos os QuickFill DESIGN leem a mesma lista).
+ * Salvar no Jira, além de gravar a lista: troca a descrição (se o texto "Sobre a demanda" mudou),
+ * liga as demandas novas, aponta as Horas ainda não apontadas e comenta o resumo das faixas.
+ */
+const EXEC_PROP = "quickfill.execucoes";
+const EXEC_TIERS = [["agora", "Agora"], ["prox", "Próximo"], ["depois", "Depois"], ["aguard", "Aguardando"], ["feito", "Feito"]];
+
+/** Texto da descrição com uma linha por parágrafo (o suficiente para editar no modal). */
+function adfLinesText(node) {
+  if (!node) return "";
+  if (typeof node === "string") return node;
+  const out = [];
+  const walk = (n, line) => {
+    if (!n) return line;
+    if (n.type === "text") return line + (n.text || "");
+    if (n.type === "hardBreak") { out.push(line); return ""; }
+    let cur = line;
+    for (const c of n.content || []) cur = walk(c, cur);
+    if (["paragraph", "heading", "listItem", "codeBlock", "blockquote"].includes(n.type)) { if (cur.trim()) out.push(cur); return ""; }
+    return cur;
+  };
+  const rest = walk(node, "");
+  if (rest.trim()) out.push(rest);
+  return out.join("\n");
+}
+
+async function execGet(p = {}) {
+  const cfg = await getConfig();
+  const key = normalizeKey(p.key);
+  const [issue, prop] = await Promise.all([
+    jira(`/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,description,issuelinks,status`, { cfg }),
+    jira(`/rest/api/3/issue/${encodeURIComponent(key)}/properties/${EXEC_PROP}`, { cfg, retries: 1 }).then((r) => r?.value || null)
+      .catch((e) => { if (/404/.test(e.message)) return null; throw e; }),
+  ]);
+  const links = (issue.fields?.issuelinks || []).map((l) => {
+    const o = l.outwardIssue || l.inwardIssue;
+    return o ? { key: o.key, summary: o.fields?.summary || "", status: o.fields?.status?.name || "", rel: l.outwardIssue ? l.type?.outward : l.type?.inward } : null;
+  }).filter(Boolean);
+  return { key, summary: issue.fields?.summary || "", status: issue.fields?.status?.name || "",
+    desc: adfLinesText(issue.fields?.description), links, data: prop, url: `${cfg.baseUrl}/browse/${key}` };
+}
+
+async function execSave(p = {}) {
+  const cfg = await getConfig();
+  const key = normalizeKey(p.key);
+  const me = await getMyself(cfg);
+  const items = (Array.isArray(p.items) ? p.items : []).map((i) => ({ ...i }));
+  const steps = [];
+
+  if (p.descChanged) {
+    try {
+      await jira(`/rest/api/3/issue/${encodeURIComponent(key)}`, { method: "PUT", cfg, body: { fields: { description: adfDoc(...adfLines(p.desc)) } } });
+      steps.push("descrição atualizada");
+    } catch (e) { steps.push(`descrição não atualizada (${e.message})`); }
+  }
+
+  // Demanda ligada: cria o vínculo se ainda não existe
+  const already = new Set((p.linked || []).map((k) => String(k).toUpperCase()));
+  let linkedNow = 0;
+  for (const i of items.filter((x) => x.t === "link" && !x.linked)) {
+    const target = String(i.field || i.title || "").toUpperCase().match(/[A-Z][A-Z0-9_]*-\d+/)?.[0];
+    if (!target || target === key) continue;
+    if (already.has(target)) { i.linked = true; continue; }
+    try { await linkIssues(key, target, cfg); i.linked = true; already.add(target); linkedNow++; }
+    catch (e) { steps.push(`vínculo com ${target} falhou (${e.message})`); }
+  }
+  if (linkedNow) steps.push(`${linkedNow} ${linkedNow === 1 ? "vínculo criado" : "vínculos criados"}`);
+
+  // Horas: aponta o tempo ainda não apontado, agora
+  let logged = 0;
+  for (const i of items.filter((x) => x.t === "horas" && !x.logged)) {
+    const d = parseDuration(i.field || "");
+    if (!d.ok || !d.minutes) continue;
+    const now = new Date();
+    const start = Math.max(0, now.getHours() * 60 + now.getMinutes() - d.minutes);
+    try {
+      await jira(`/rest/api/3/issue/${encodeURIComponent(key)}/worklog?adjustEstimate=auto`, { method: "POST", cfg,
+        body: { timeSpent: formatJira(d.minutes), started: toJiraLocal(todayLocal(), start),
+          comment: adfDoc(adfPara(`${i.title || "Execução"} (QuickFill DESIGN)`)) } });
+      i.logged = true; i.loggedAt = Date.now(); logged += d.minutes;
+    } catch (e) { steps.push(`horas de “${i.title}” não apontadas (${e.message})`); }
+  }
+  if (logged) {
+    clearBusyCache();
+    steps.push(`${fmtDur(logged)} apontadas`);
+  }
+
+  const value = { v: 1, items, by: me.displayName, at: Date.now() };
+  await jira(`/rest/api/3/issue/${encodeURIComponent(key)}/properties/${EXEC_PROP}`, { method: "PUT", cfg, body: value });
+
+  if (p.comment !== false && items.length) {
+    const lines = EXEC_TIERS.map(([id, label]) => {
+      const list = items.filter((i) => i.tier === id);
+      return list.length ? [adfPara(adfBold(`${label} (${list.length})`)), adfList(list.map((i) => `${i.typeLabel || i.t}: ${i.title}${i.field ? ` · ${i.field}` : ""}`))] : [];
+    }).flat();
+    const notes = items.filter((i) => i.t === "nota" && i.detail).map((i) => adfPara(adfBold(`${i.title}: `), i.detail));
+    try {
+      await addComment(key, adfDoc(
+        adfPara(adfBold("Execuções da demanda")),
+        ...lines, ...notes,
+        adfPara(adfText(`Atualizado por ${me.displayName} pelo QuickFill DESIGN.`, [{ type: "em" }])),
+      ), cfg);
+      steps.push("comentário com o resumo das faixas");
+    } catch (e) { steps.push(`comentário não enviado (${e.message})`); }
+  }
+  _ux.at = 0;
+  return { key, value, steps, message: `Execuções salvas em ${key}${steps.length ? `: ${steps.join(", ")}` : ""}.` };
 }
 
 /* ------------------------------------------------------------------ */
@@ -3498,6 +3511,7 @@ const HANDLERS = {
   TEST_CONNECTION: testConnection,
   LOAD_TREE: (p) => loadIssueTree(p.key),
   LOAD_SUBTASK: (p) => loadSubtaskContext(p.key),
+  MOVE_ISSUE: (p) => moveIssue(p),
   APPLY: (p) => applySingle(p),
   PLAN_PREVIEW: (p) => previewWorkday(p),
   DAY_REPORT: (p) => dayReport(p),
@@ -3511,6 +3525,8 @@ const HANDLERS = {
   DESIGN_HUS: (p) => designHus(p),
   UX_BOARD: (p) => uxBoardData(p),
   UX_ACTION: (p) => uxAction(p),
+  EXEC_GET: (p) => execGet(p),
+  EXEC_SAVE: (p) => execSave(p),
   ASSIGNABLE_USERS: (p) => assignableUsers(p),
   ASSIGN_ISSUE: (p) => assignIssue(p),
   SAVE_SCRUM_SETTINGS: (p) => saveScrumSettings(p),

@@ -287,6 +287,9 @@
 
         <div id="subtaskList" class="list"></div>
 
+        <!-- Demanda escolhida: o fluxo Item Pendente → Em Andamento → Concluído e o que dá para fazer nela -->
+        <section class="dflow hidden" id="demandFlow" aria-live="polite"></section>
+
         <div class="inline-create" id="createSingle">
           <button class="link" id="btnShowCreateSingle">+ Nova subtarefa</button>
           <div class="inline-create-body hidden" id="createSingleBody">
@@ -433,7 +436,7 @@
 
         <!-- 1. Quanto tempo -->
         <div class="fgroup">
-          <div class="fgroup-t"><span class="n">1</span>Quanto tempo</div>
+          <div class="fgroup-t">Quanto tempo</div>
           <div class="grid2">
             <div class="fld">
               <span>Trabalhado</span>
@@ -454,7 +457,7 @@
         <!-- 2. Quando -->
         <div class="fgroup">
           <div class="fgroup-t">
-            <span class="n">2</span>Quando
+            Quando
             <div class="time-modes">
               <button type="button" id="btnNow" title="Terminei agora">agora</button>
               <button type="button" id="btnAutoTime" title="Primeiro horário livre da jornada">auto</button>
@@ -480,7 +483,7 @@
 
         <!-- 3. Demanda -->
         <div class="fgroup">
-          <div class="fgroup-t"><span class="n">3</span>Demanda</div>
+          <div class="fgroup-t">Demanda</div>
           <div class="grid2">
             <label class="fld">
               <span>Status</span>
@@ -586,6 +589,21 @@
       <button id="btnReset" class="btn ghost">Limpar</button>
       <button id="btnApply" class="btn primary grow">Aplicar</button>
     </footer>
+
+    <!-- ============ Modal: apontar e atualizar a demanda (aba Tarefa) ============ -->
+    <div class="am-back hidden" id="applyModal">
+      <div class="am-box" role="dialog" aria-modal="true" aria-labelledby="amTitle">
+        <header class="am-head">
+          <div class="am-ttl"><b id="amTitle">Apontar</b><span id="amSub"></span></div>
+          <button class="ic" id="amClose" aria-label="Fechar">✕</button>
+        </header>
+        <div class="am-body" id="amBody"></div>
+        <footer class="am-foot">
+          <button class="btn ghost" id="amCancel">Cancelar</button>
+          <button class="btn primary grow" id="amApply">Aplicar</button>
+        </footer>
+      </div>
+    </div>
 
     <div id="toast" class="toast hidden" role="status"></div>
   </div>
