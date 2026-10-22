@@ -5,20 +5,21 @@
 #   Depois: no aviso "Nova versão" do QuickFill, clique em "Atualizar agora" (botão nativo — ver abaixo)
 #           ou em "Copiar comando de atualização" e cole no Win+R.
 #
-# Botão "Atualizar agora": este script registra um pequeno ajudante do Chrome (Native Messaging, só para
+# Botão "Atualizar agora": SOMENTE com -AtivarAjudante este script registra um ajudante (Native Messaging, só para
 # este usuário, sem administrador) em Documentos\QuickFill\.ajudante. A extensão chama o ajudante, que roda
 # este mesmo script em modo silencioso e devolve o resultado; a extensão então se recarrega sozinha.
 #
-#   -Pacotes qa,dev   instala/atualiza só esses       -ExtId <id>   libera o botão para essa extensão
+#   -Pacotes qa,dev   instala/atualiza só esses       -AtivarAjudante -ExtId <id>   ativa o botão (opcional)
 #   -Silencioso       sem perguntas (usado pelo ajudante)   -TrocarToken   (repositório privado) pede o token de novo
-#   Pelo Win+R os mesmos valores podem vir em variáveis: QF_EXT_ID, QF_PACOTES.
+#   Pelo Win+R: QF_EXT_ID, QF_PACOTES e QF_AJUDANTE=1 (consentimento explícito).
 #
 # Os endereços abaixo são preenchidos pelo build.mjs (release.config.json).
 
-param([string]$Pacotes = "", [switch]$TrocarToken, [switch]$Silencioso, [string]$ExtId = "")
+param([string]$Pacotes = "", [switch]$TrocarToken, [switch]$Silencioso, [string]$ExtId = "", [switch]$AtivarAjudante)
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 if (-not $ExtId -and $env:QF_EXT_ID) { $ExtId = $env:QF_EXT_ID }
 if (-not $Pacotes -and $env:QF_PACOTES) { $Pacotes = $env:QF_PACOTES }
+if ($env:QF_AJUDANTE -eq "1") { $AtivarAjudante = $true }
 
 $UpdateUrl = "__UPDATE_URL__"
 $ScriptUrl = "__SCRIPT_URL__"
@@ -40,6 +41,9 @@ function Falhar([string]$msg) {
 
 if (-not $Silencioso) { Write-Host ""; Write-Host "  QuickFill - instalar / atualizar" -ForegroundColor Cyan; Write-Host "" }
 if ($UpdateUrl -like "__*") { Falhar "Endereço de atualização não configurado (release.config.json)." }
+if ($AtivarAjudante -and ($ExtId -notmatch '^[a-p]{32}$' -or $ScriptUrl -like "__*")) {
+  Falhar "Para ativar o Ajudante, copie o comando nas Opções do QuickFill (ID da extensão necessário)."
+}
 New-Item -ItemType Directory -Force -Path $Destino | Out-Null
 
 # Token de leitura (só quando o repositório é privado) — guardado criptografado para este usuário (DPAPI)
@@ -88,6 +92,7 @@ $novos = @()
 foreach ($p in $lista) {
   $pkg = $info.packages.$p
   if (-not $pkg) { Write-Host "Pacote desconhecido: $p" -ForegroundColor Yellow; continue }
+  if ($pkg.folder -ne "jira-quickfill-$p") { Falhar "Pasta inválida no pacote $p." }
   # Cada perfil tem a sua versão: se este já está na mais nova, não baixa de novo (a não ser que tenha sido pedido pelo nome).
   $manAtual = Join-Path (Join-Path $Destino $pkg.folder) "manifest.json"
   if (-not $Pacotes -and (Test-Path $manAtual)) {
@@ -98,8 +103,15 @@ foreach ($p in $lista) {
   Write-Host "Baixando $p $($pkg.version) ..."
   Invoke-WebRequest -Uri $pkg.download -OutFile $zip -Headers $headers -UseBasicParsing
   $pasta = Join-Path $Destino $pkg.folder
+  # Valida os caminhos absolutos antes de qualquer exclusão recursiva.
+  $destinoAbsoluto = [IO.Path]::GetFullPath($Destino).TrimEnd('\') + '\'
+  $pasta = [IO.Path]::GetFullPath($pasta)
+  if (-not $pasta.StartsWith($destinoAbsoluto, [StringComparison]::OrdinalIgnoreCase)) { Falhar "Pasta fora do destino QuickFill." }
   if (-not (Test-Path (Join-Path $pasta "manifest.json"))) { $novos += $pasta }
   $tmp = Join-Path $env:TEMP "qf-$p"
+  $tempAbsoluto = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
+  $tmp = [IO.Path]::GetFullPath($tmp)
+  if (-not $tmp.StartsWith($tempAbsoluto, [StringComparison]::OrdinalIgnoreCase)) { Falhar "Pasta temporária inválida." }
   if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
   Expand-Archive -Path $zip -DestinationPath $tmp -Force
   $origem = Get-ChildItem $tmp -Directory | Select-Object -First 1
@@ -117,12 +129,13 @@ foreach ($p in $lista) {
 # Ajudante do botão "Atualizar agora" (Native Messaging). Registrado para este usuário (HKCU), liberado
 # só para as extensões QuickFill que pediram (ids em .ajudante\ids.txt).
 # ---------------------------------------------------------------------------------------------------
+$ajudante = $false
+if ($AtivarAjudante) {
 $HostDir = Join-Path $Destino ".ajudante"
 $IdsFile = Join-Path $HostDir "ids.txt"
 $ids = @()
 if (Test-Path $IdsFile) { $ids = @(Get-Content $IdsFile | Where-Object { $_ -match '^[a-p]{32}$' }) }
 if ($ExtId -match '^[a-p]{32}$' -and $ids -notcontains $ExtId) { $ids += $ExtId }
-$ajudante = $false
 if ($ids.Count -and $ScriptUrl -notlike "__*") {
   New-Item -ItemType Directory -Force -Path $HostDir | Out-Null
   Set-Content -Path $IdsFile -Value $ids -Encoding ASCII
@@ -145,6 +158,7 @@ try {
     if ($pkg -notmatch '^(qa|dev|scrum|design)$') { throw "Pacote inválido." }
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $code = Invoke-RestMethod -Uri ("__SCRIPT_URL__?t=" + [DateTimeOffset]::Now.ToUnixTimeSeconds()) -UseBasicParsing
+    $env:QF_AJUDANTE = "0"; $env:QF_EXT_ID = ""
     & ([scriptblock]::Create($code)) -Pacotes $pkg -Silencioso *> $log
     Responder @{ ok = $true }
     exit 0
@@ -166,6 +180,7 @@ try {
   }
   $ajudante = $true
 }
+} # Fim da ativação opcional. Atualizações comuns não criam nem alteram .ajudante ou o Registro.
 
 if ($Silencioso) { return }
 
@@ -178,7 +193,7 @@ if ($novos.Count) {
   foreach ($n in $novos) { Write-Host "       $n" -ForegroundColor Green }
   Write-Host "     (o caminho já foi copiado — cole com Ctrl+V na barra de endereço da janela de escolha)"
   Write-Host "  3. Nas Opções da extensão, preencha URL do Jira, e-mail e token do Jira"
-  Write-Host "  4. Ainda nas Opções, clique em 'Ativar atualização com um clique' e cole o comando no Win+R"
+  Write-Host "  4. Opcional: nas Opções, ative o Ajudante para atualizar com um clique"
   try { Set-Clipboard -Value $novos[0] } catch { }
   try { Start-Process explorer.exe $Destino } catch { }
 } else {

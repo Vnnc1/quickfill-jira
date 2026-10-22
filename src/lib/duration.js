@@ -95,11 +95,13 @@ export function humanize(minutes) {
  * - digitou um valor diferente da atual → grava o novo;
  * - digitou o mesmo valor, ou deixou vazio e a tarefa já tem estimativa → não mexe ("");
  * - vazio e a tarefa sem estimativa → usa o trabalhado (se fromSpent).
+ * - preserveExisting: uma sugestão automática nunca substitui a estimativa existente.
  */
-export function pickEstimate({ typed = "", current = "", spent = "", fromSpent = true } = {}) {
+export function pickEstimate({ typed = "", current = "", spent = "", fromSpent = true, preserveExisting = false } = {}) {
   const t = String(typed || "").trim();
   const cur = parseDuration(current);
   const hasCurrent = cur.ok && cur.minutes > 0;
+  if (preserveExisting && hasCurrent) return "";
   if (t) {
     const p = parseDuration(t);
     return hasCurrent && p.ok && p.minutes === cur.minutes ? "" : t;

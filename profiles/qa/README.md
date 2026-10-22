@@ -284,13 +284,25 @@ Todo apontamento — numa subtarefa ou em lote — é encaixado na sua jornada:
   jornada**, escolha *Levar o restante para o próximo dia útil* (respeita o teto e pula
   sábado/domingo).
 
-**Começou / Terminou — calculado pelo tempo trabalhado.** O formulário segue a ordem em que
-você pensa ao terminar uma demanda: *1. Quanto tempo* → *2. Quando* → *3. Demanda*.
+**Início / Fim — calculado pelo tempo trabalhado.** O modal abre com a **Linha do tempo**
+da jornada no topo, inclusive antes de informar a duração. Abaixo ficam o dia, início e fim,
+o tempo trabalhado e a estimativa, o comentário em várias linhas e os ajustes da demanda.
+As ações **Cancelar** e **Aplicar** ficam visíveis no rodapé durante a rolagem.
 
-- O campo **Terminou** já vem com **agora**. Ao digitar o **Trabalhado**, o **Começou** é
+- O campo **Fim** já vem com **agora**. Ao digitar o **Tempo trabalhado**, o **Início** é
   calculado sozinho: terminou às 14:43 com 40m → começou às **14:03**.
-- Prefere informar quando começou? Digite no **Começou** e o **Terminou** é calculado.
-- **agora** volta o término para o horário atual; **auto** deixa a extensão escolher o
+- Se preferir informar a duração, preencha **Tempo trabalhado** com o **Início** para
+  calcular o **Fim**, ou com o **Fim** para calcular o **Início**.
+- Informe **Início** e **Fim** para preencher automaticamente **Tempo trabalhado** e
+  **Estimativa total** com a duração do intervalo (11:00–12:30 → 1h30). Se a demanda já
+  tiver estimativa no Jira, ela é mantida; o cálculo só preenche onde não há estimativa.
+  A mesma regra vale para cada demanda no lote. Esses dois campos
+  são opcionais e permitem ajuste manual. Uma estimativa ajustada manualmente é mantida
+  nas próximas mudanças de horário; limpar a estimativa volta à estimativa existente ou,
+  quando não houver uma, ao cálculo automático.
+- No lote, o intervalo é dividido entre as demandas selecionadas, em minutos inteiros.
+  Fim igual ou anterior ao início é avisado antes de enviar o apontamento.
+- **Agora** volta o término para o horário atual; **Encaixar na jornada** deixa a extensão escolher o
   primeiro horário livre da jornada (comportamento antigo).
 - No **Lote**, o tempo vale para cada subtarefa e elas entram em sequência: 3 × 40m
   terminando às 14:43 → 12:43 → 14:43.
@@ -340,13 +352,23 @@ A aba **Meu dia** mostra, para a data escolhida:
 - **Total apontado x meta**, com um selo: *Faltam 30m para a meta*, *✓ Meta batida · +1h*
   ou *Passou do teto de 6h*.
 - **Linha do tempo 11:00–17:00** com cada apontamento no horário real, uma cor por demanda.
-- **Demandas trabalhadas** — chave, status, resumo, horários e tempo de cada uma; clique
-  para abrir no Jira.
+- **Suas demandas recentes** — demandas atribuídas a você ou movimentadas por você, em
+  qualquer status, com a última mudança e o responsável atual. Usa os filtros de espaço
+  e período no topo. Clique para abrir na aba **Tarefa**, ou use os atalhos de histórico
+  e Jira. **Ver no Painel** mantém o período e o espaço para consultar a lista completa.
+  Esse card substitui **Demandas trabalhadas** e deixa de aparecer na aba **Tarefa**.
 - **Últimos 10 dias úteis** — gráfico de barras com a linha da meta: verde = meta batida,
   azul = abaixo, cinza = sem apontamento. Clique numa barra para abrir aquele dia.
 
 Navegue com ‹ › (pulando fins de semana), pelo calendário ou em **Hoje**. Os dados vêm
 dos seus worklogs no Jira, então o que você apontar à mão também aparece.
+
+O formulário **Evidência de teste / retorno ao DEV**, sua publicação e a configuração de
+categorias de reprovação foram retirados dos quatro pacotes. A fila de Validação e os
+apontamentos continuam disponíveis.
+Demandas criadas pelas atividades da linha do tempo usam somente a descrição
+informada, sem acrescentar “Marcado no QuickFill” nem horários ao texto. Os horários
+continuam registrados no apontamento. Descrições já publicadas no Jira permanecem como estão.
 
 ### Formato de tempo (M · H · D)
 
@@ -437,7 +459,7 @@ README do pacote DEV.
 ## Voltar de onde parou (3.11)
 
 Fechar clicando fora, com **Esc**, abrindo uma demanda no Jira ou trocando de aba do navegador guarda a tela:
-aba, rolagem, filtros, buscas, cartões abertos e campos digitados (inclusive a evidência de teste). Ao reabrir, volta igual, com os
+aba, rolagem, filtros, buscas, cartões abertos e campos digitados. Ao reabrir, volta igual, com os
 dados que já estavam carregados (até 10 min; o ↻ sempre busca de novo). O **X** fecha de verdade: limpa isso e,
 na próxima vez, tudo vem do Jira.
 
@@ -465,9 +487,6 @@ na próxima vez, tudo vem do Jira.
 
 - **Aba Validação:** a fila de tudo que está nas colunas de validação, por prioridade e tempo esperando,
   com **Testar** (abre na aba Tarefa) e o filtro *Atribuídas a mim*.
-- **Evidência de teste / retorno ao DEV** (aba Tarefa, abaixo da lista): Aprovado ou Reprovado,
-  ambiente, passos/evidência e link. Vira um comentário padronizado na tarefa pai (ou na selecionada).
-  Na reprovação escolha a categoria (Opções) e o motivo: a demanda ganha a etiqueta `retorno-<categoria>`.
 - **Etapas do quadro** nas Opções (Feito, Deploy, Validação, Reaberto) — provisório, vazio = padrão.
 
 ## QuickFill SCRUM e QuickFill DESIGN

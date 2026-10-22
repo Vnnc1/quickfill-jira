@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Jira QuickFill</title>
   <link rel="stylesheet" href="modal.css" />
+  <link rel="stylesheet" href="changelog.css" />
 </head>
 <body>
   <div class="app" id="app">
@@ -51,6 +52,7 @@
       </div>
 
       <div class="top-actions">
+        <button class="ic" id="btnChangelog" title="Novidades e histórico de versões" aria-label="Novidades e histórico de versões"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l3 3v15H6zM14 3v4h4M9 11h6M9 15h6"/></svg></button>
         <button class="ic" id="btnDiscard" title="Descartar rascunho">⟲</button>
         <button class="ic" id="btnLayout" title="Painel lateral / modal grande">◧</button>
         <button class="ic pop-only" id="btnPop" title="Soltar como janela (pode ficar por cima de outros programas)" aria-label="Soltar como janela"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="14" height="13" rx="2"/><path d="M13 3h8v8M21 3l-8 8"/></svg></button>
@@ -302,54 +304,26 @@
           </div>
         </div>
 
-        <section class="card nofold-x" id="recentCard" data-roles="qa">
-          <div class="card-t"><b>Suas demandas recentes</b>
-            <div class="seg" id="recentPeriod">
-              <button data-p="today" class="on">Hoje</button>
-              <button data-p="yesterday">Ontem</button>
-              <button data-p="7">7 dias</button>
-            </div>
-          </div>
-          <div id="recentBox"></div>
-          <button class="link" id="recentAll">ver no Painel</button>
-        </section>
-
-        <div class="inline-create" id="evidenceBlock">
-          <button class="link" id="btnShowEvidence">+ Evidência de teste / retorno ao DEV</button>
-          <div class="inline-create-body ev hidden" id="evidenceBody">
-            <div class="ev-row">
-              <div class="seg" id="evResult">
-                <button data-r="approved" class="on">✅ Aprovado</button>
-                <button data-r="rejected">❌ Reprovado</button>
-              </div>
-              <select id="evTarget" class="inp sm" title="Onde registrar"></select>
-            </div>
-            <div id="evReject" class="ev-row hidden">
-              <select id="evCategory" class="inp sm" title="Categoria da reprovação"></select>
-              <input id="evReason" class="inp sm" placeholder="Motivo (o que está errado)" />
-            </div>
-            <input id="evEnv" class="inp sm" placeholder="Ambiente (ex.: HMP, DES)" value="HMP" />
-            <textarea id="evSteps" class="inp ta" rows="3" placeholder="Evidência / passos executados (um por linha)"></textarea>
-            <input id="evLink" class="inp sm" placeholder="Link da evidência (vídeo, print, drive) — opcional" />
-            <p class="muted xs">Vira um comentário padronizado na demanda. Na reprovação, a demanda ganha a etiqueta <b>retorno-&lt;categoria&gt;</b>, que o SCRUM usa para mostrar a causa do retrabalho.</p>
-            <button id="btnEvidence" class="btn primary sm">Registrar aprovação</button>
-          </div>
-        </div>
       </section>
 
       <!-- ============ Lote: espaços MEED e SUS (mesmo painel, estado por espaço) ============ -->
       <section class="pane hidden" data-pane="space">
-        <div class="spacebar">
+        <div class="spacebar lote-top">
           <span class="muted xs">Espaço</span>
           <div class="seg big" id="spaceSeg">
             <button data-space="batch" class="on">MEED</button>
             <button data-space="sustentacao">SUS</button>
           </div>
+          <div class="toggles lote-filters">
+            <label class="tgl"><input type="checkbox" id="onlyMineBoard" /><span>Só minhas</span></label>
+            <label class="tgl"><input type="checkbox" id="excludeSubBoard" checked /><span>Só tarefas pai</span></label>
+          </div>
         </div>
 
         <div class="step">
           <div class="step-hdr">
-            <span class="step-n">1</span><span class="step-t">Tarefas</span>
+            <span class="step-t">Tarefas</span>
+            <span class="muted xs lote-board" id="boardName"></span>
             <div class="seg" id="sourceSeg">
               <button data-src="board" class="on">Quadro</button>
               <button data-src="manual">Digitar</button>
@@ -358,19 +332,17 @@
 
           <!-- Origem: quadro -->
           <div id="srcBoard">
-            <div class="row">
-              <select id="boardSel" class="inp"><option value="">Carregando quadros…</option></select>
-              <button id="btnReloadBoards" class="ic bordered" title="Recarregar quadros">↻</button>
+            <!-- o quadro é o do Espaço escolhido acima (MEED ou SUS): sem escolha aqui -->
+            <div class="row hidden" aria-hidden="true">
+              <select id="boardSel" class="inp" tabindex="-1"><option value="">Carregando quadros…</option></select>
+              <button id="btnReloadBoards" class="ic bordered" tabindex="-1" title="Recarregar quadros">↻</button>
             </div>
             <div id="colsList" class="pills hidden"></div>
             <div id="manualStatusBox" class="hidden">
               <input id="statusColumns" class="inp" placeholder="Status, ex.: Validação, Deploy" />
             </div>
             <div class="row between">
-              <div class="toggles">
-                <label class="tgl"><input type="checkbox" id="onlyMineBoard" /><span>Só minhas</span></label>
-                <label class="tgl"><input type="checkbox" id="excludeSubBoard" checked /><span>Só tarefas pai</span></label>
-              </div>
+              <span></span>
               <button id="btnFromBoard" class="btn primary sm">Buscar</button>
             </div>
             <p class="muted xs" id="boardInfo"></p>
@@ -382,6 +354,21 @@
                   <button id="boardAll">Todas</button>
                   <button id="boardMine">Minhas</button>
                   <button id="boardNone">Nenhuma</button>
+                </div>
+              </div>
+              <div class="inline-create lote-create" id="createBatch">
+                <button class="link" id="btnShowCreateBatch">+ Criar subtarefa nas tarefas selecionadas</button>
+                <div class="inline-create-body hidden" id="createBatchBody">
+                  <input id="newSubtaskNameBatch" class="inp" placeholder="Testes Manuais" />
+                  <div class="toggles">
+                    <label class="tgl"><input type="checkbox" id="assignSelfBatch" checked /><span>Atribuir a mim</span></label>
+                    <label class="tgl"><input type="checkbox" id="skipDupBatch" checked /><span>Pular existentes</span></label>
+                  </div>
+                  <label class="fld lote-who">
+                    <span>Ou atribuir a outra pessoa</span>
+                    <select id="assignOtherBatch" class="inp sm"><option value="">Ninguém além de mim</option></select>
+                  </label>
+                  <button id="btnCreateBatch" class="btn primary sm">Criar</button>
                 </div>
               </div>
               <div id="boardList" class="list tall"></div>
@@ -398,7 +385,7 @@
 
         <div class="step" id="stepSubs">
           <div class="step-hdr">
-            <span class="step-n">2</span><span class="step-t" id="step2Title">Aplicar em</span>
+            <span class="step-t" id="step2Title">Aplicar em</span>
             <div class="seg" id="levelSeg">
               <button data-level="sub" class="on">Subtarefas</button>
               <button data-level="parent">Tarefas pai</button>
@@ -415,52 +402,25 @@
           <div id="batchList" class="list tall"></div>
           <div id="batchErrors" class="alert danger xs hidden"></div>
           <p class="muted xs" id="batchCount">Escolha as tarefas acima.</p>
-
-          <div class="inline-create" id="createBatch">
-            <button class="link" id="btnShowCreateBatch">+ Criar subtarefa nas tarefas selecionadas</button>
-            <div class="inline-create-body hidden" id="createBatchBody">
-              <input id="newSubtaskNameBatch" class="inp" placeholder="Testes Manuais" />
-              <div class="toggles">
-                <label class="tgl"><input type="checkbox" id="assignSelfBatch" checked /><span>Atribuir a mim</span></label>
-                <label class="tgl"><input type="checkbox" id="skipDupBatch" checked /><span>Pular existentes</span></label>
-              </div>
-              <button id="btnCreateBatch" class="btn primary sm">Criar</button>
-            </div>
+          <div class="lote-apply hidden" id="batchApplyBar">
+            <button class="btn primary grow" id="btnBatchModal">Apontar e atualizar</button>
           </div>
+
         </div>
       </section>
 
       <!-- ============ Formulário (compartilhado) ============ -->
       <section class="form hidden" id="formCard">
+        <div id="workdayBox" class="wd hidden" role="region" aria-label="Linha do tempo da jornada" aria-live="polite"></div>
         <div class="form-target" id="targetLine"></div>
 
-        <!-- 1. Quanto tempo -->
-        <div class="fgroup">
-          <div class="fgroup-t">Quanto tempo</div>
-          <div class="grid2">
-            <div class="fld">
-              <span>Trabalhado</span>
-              <input id="spent" class="inp mono big" placeholder="40m, 1h30" autocomplete="off" />
-              <div class="chips" data-target="spent"><button>15m</button><button>30m</button><button>1h</button><button>2h</button></div>
-              <small id="prevSpent"></small>
-            </div>
-            <div class="fld">
-              <span>Estimativa</span>
-              <input id="estimate" class="inp mono big" placeholder="vazio = mantém a atual" autocomplete="off" />
-              <div class="chips" data-target="estimate"><button>15m</button><button>30m</button><button>1h</button><button>2h</button></div>
-              <small id="prevEstimate"></small>
-            </div>
-          </div>
-          <p class="match" id="estMatch"></p>
-        </div>
-
-        <!-- 2. Quando -->
-        <div class="fgroup">
+        <!-- Horários e duração ficam juntos, logo abaixo da linha do tempo. -->
+        <div class="fgroup" id="timeGroup">
           <div class="fgroup-t">
-            Quando
+            Apontamento
             <div class="time-modes">
-              <button type="button" id="btnNow" title="Terminei agora">agora</button>
-              <button type="button" id="btnAutoTime" title="Primeiro horário livre da jornada">auto</button>
+              <button type="button" id="btnNow" title="Terminei agora">Agora</button>
+              <button type="button" id="btnAutoTime" title="Primeiro horário livre da jornada">Encaixar na jornada</button>
             </div>
           </div>
           <div class="grid3t">
@@ -470,20 +430,42 @@
               <small id="curStart"></small>
             </label>
             <label class="fld">
-              <span>Começou</span>
-              <input type="time" id="startTime" class="inp mono" step="60" />
+              <span>Início</span>
+              <input type="time" id="startTime" class="inp mono" step="60" aria-describedby="timeHint" />
             </label>
             <label class="fld">
-              <span>Terminou</span>
-              <input type="time" id="endTime" class="inp mono" step="60" />
+              <span>Fim</span>
+              <input type="time" id="endTime" class="inp mono" step="60" aria-describedby="timeHint" />
             </label>
           </div>
-          <div class="timeline-hint" id="timeHint">Automático: primeiro horário livre a partir das 11:00.</div>
+          <div class="timeline-hint" id="timeHint" role="status">Automático: primeiro horário livre a partir das 11:00.</div>
         </div>
 
-        <!-- 3. Demanda -->
         <div class="fgroup">
-          <div class="fgroup-t">Demanda</div>
+          <div class="grid2">
+            <div class="fld" role="group" aria-labelledby="spentLabel">
+              <span id="spentLabel"><label for="spent">Tempo trabalhado</label><em class="field-optional">Opcional</em></span>
+              <input id="spent" class="inp mono big" placeholder="Calculado pelo início e fim" autocomplete="off" />
+              <div class="chips" data-target="spent"><button>15m</button><button>30m</button><button>1h</button><button>2h</button></div>
+              <small id="prevSpent"></small>
+            </div>
+            <div class="fld" role="group" aria-labelledby="estimateLabel">
+              <span id="estimateLabel"><label for="estimate">Estimativa total</label><em class="field-optional">Opcional</em></span>
+              <input id="estimate" class="inp mono big" placeholder="Calculada pelo início e fim" autocomplete="off" />
+              <div class="chips" data-target="estimate"><button>15m</button><button>30m</button><button>1h</button><button>2h</button></div>
+              <small id="prevEstimate"></small>
+            </div>
+          </div>
+          <p class="match" id="estMatch"></p>
+          <label class="fld">
+            <span>Comentário do apontamento <em class="field-optional">Opcional</em></span>
+            <textarea id="worklogComment" class="inp ta" rows="2" placeholder="O que foi feito neste período?"></textarea>
+          </label>
+        </div>
+
+        <!-- Atualizações da demanda são secundárias ao apontamento. -->
+        <div class="fgroup">
+          <div class="fgroup-t">Atualizar demanda <span class="field-optional">Opcional</span></div>
           <div class="grid2">
             <label class="fld">
               <span>Status</span>
@@ -501,13 +483,7 @@
             <div class="fib" id="fibGroup" role="radiogroup"></div>
             <small id="curStory"></small>
           </div>
-          <label class="fld">
-            <span>Comentário do apontamento</span>
-            <input id="worklogComment" class="inp" placeholder="opcional" />
-          </label>
         </div>
-
-        <div id="workdayBox" class="wd hidden"></div>
       </section>
 
       <!-- ============ Resultado ============ -->
@@ -581,6 +557,13 @@
           <button class="ic bordered" id="dayRefresh" title="Atualizar">↻</button>
         </div>
         <div id="dayBox"><p class="muted xs">Carregando…</p></div>
+        <section class="card nofold-x" id="recentCard" data-roles="qa" aria-labelledby="recentTitle">
+          <div class="card-t"><b id="recentTitle">Suas demandas recentes</b><span id="recentInfo"></span></div>
+          <p class="recent-context">Atribuídas a você ou movimentadas por você, em qualquer status.</p>
+          <div id="recentBox" aria-live="polite"></div>
+          <button class="link" id="recentAll">Ver no Painel</button>
+        </section>
+        <div id="dayHistoryBox"></div>
       </section>
     </main>
 
@@ -597,7 +580,10 @@
           <div class="am-ttl"><b id="amTitle">Apontar</b><span id="amSub"></span></div>
           <button class="ic" id="amClose" aria-label="Fechar">✕</button>
         </header>
-        <div class="am-body" id="amBody"></div>
+        <div class="am-main">
+          <aside class="am-side hidden" id="amSide" aria-label="Onde aplicar"></aside>
+          <div class="am-body" id="amBody"></div>
+        </div>
         <footer class="am-foot">
           <button class="btn ghost" id="amCancel">Cancelar</button>
           <button class="btn primary grow" id="amApply">Aplicar</button>

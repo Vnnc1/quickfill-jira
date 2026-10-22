@@ -18,6 +18,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "no
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ROOT, ORDER, readProfiles, saveProfile, buildProfile, packageHash, zipProfile, readUpdate, writeUpdate, writeInstaller } from "../build.mjs";
+import { profileHistory } from "./changelog.mjs";
 
 const args = process.argv.slice(2);
 const cmd = args.shift();
@@ -93,9 +94,9 @@ function release() {
     const entry = `## ${p.version} (${today})\n\n${notes.split(/\n|;\s*/).filter(Boolean).map((n) => `- ${n.trim()}`).join("\n")}\n\n`;
     const at = text.indexOf("\n## ");
     writeFileSync(log, at < 0 ? `${text.trimEnd()}\n\n${entry}` : text.slice(0, at + 1) + entry + text.slice(at + 1));
-    buildProfile(p);
+    buildProfile(p, { released: true });
     zipProfile(p);
-    released[role] = { version: p.version, date: today, notes, hash: packageHash(p) };
+    released[role] = { version: p.version, date: today, notes, changelog: profileHistory(ROOT, role), hash: packageHash(p) };
   }
   if (dry) return console.log("\n(--dry: nada foi gravado)");
   // os outros perfis também são gerados de novo (pastas de teste), mas não mudam de versão nem de .zip

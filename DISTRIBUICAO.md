@@ -23,15 +23,30 @@ Para atualizações o sistema retorna qualquer atualização em uns 20 minutos (
 
 ## Como funciona o botão "Atualizar agora"
 
-O Chrome não deixa uma extensão alterar os próprios arquivos. Por isso o instalador registra um pequeno
-**ajudante** do Chrome (*Native Messaging*):
+O Chrome não deixa uma extensão alterar os próprios arquivos. Quem quiser atualizar com um clique pode
+ativar um pequeno **ajudante** do Chrome (*Native Messaging*) nas Opções ou no modal de novidades.
+A instalação e a atualização comuns pelo PowerShell não criam nem regravam o Ajudante ou o Registro.
+Somente o comando de ativação usa `QF_AJUDANTE=1` (ou `-AtivarAjudante -ExtId <id>`):
 - fica em `Documentos\QuickFill\.ajudante` e vale só para aquele usuário do Windows, sem administrador;
 - é liberado apenas para os QuickFill que pediram;
 - ao clicar no botão, a extensão chama o ajudante, que roda o mesmo instalador em modo silencioso e baixa a
   versão nova do repositório; em seguida a extensão se recarrega e volta onde a pessoa estava.
 
-Para desativar, apague a pasta `.ajudante` e a chave
-`HKCU\Software\Google\Chrome\NativeMessagingHosts\com.quickfill.updater`.
+Para desativar, apague a pasta `.ajudante` e as chaves
+`HKCU\Software\Google\Chrome\NativeMessagingHosts\com.quickfill.updater` e
+`HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.quickfill.updater`.
+
+## Novidades por versão e por build
+
+O modal abre uma vez por versão disponível e por conteúdo novo instalado. O histórico pode ser
+reaberto pelo botão de novidades no cabeçalho. As notas vêm do `CHANGELOG.md` de cada perfil e são
+incluídas no pacote e em `update.json` quando há release, inclusive para quem pulou versões.
+Servidores antigos que fornecem apenas `notes` continuam funcionando.
+
+`npm run build` gera também um relatório dos arquivos alterados e as mensagens dos commits desde o
+último registro do histórico. Para fornecer descrições específicas,
+use `npm run build -- --notes "Correção na busca; Ajudante opcional"`. Para publicar e notificar a
+equipe, continue usando `npm run release -- <perfil> -m "o que mudou"` e publique os arquivos gerados.
 
 ## Perguntas comuns
 

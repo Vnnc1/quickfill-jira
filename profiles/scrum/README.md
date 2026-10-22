@@ -67,8 +67,8 @@ Contadores clicáveis e listas para: 🚩 impedidas (campo *Flagged*), 🔁 volt
 ⏳ paradas há N dias úteis, ☑ aguardando deploy (Feito), 🔍 fila do QA, 📅 atrasadas, ⚠ prioridade alta ainda em *A fazer*,
 👤 sem responsável, ⌛ passaram da estimativa e ➕ entraram depois do início da sprint.
 
-Com 3 ou mais itens esperando validação, aparece um aviso de gargalo no QA. Quando o QA reprova pelo
-QuickFill QA, a causa (etiqueta `retorno-…`) aparece em *Voltaram* e no bloco **Retrabalho por causa**.
+Com 3 ou mais itens esperando validação, aparece um aviso de gargalo no QA. Causas já registradas
+no Jira com etiquetas `retorno-…` aparecem em *Voltaram* e no bloco **Retrabalho por causa**.
 
 ## Equipe
 

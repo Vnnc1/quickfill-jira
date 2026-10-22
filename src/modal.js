@@ -1,6 +1,10 @@
 import { parseDuration, humanize } from "./lib/duration.js";
+import { workInterval } from "./lib/work-interval.js";
 import { saveDraft, flushDraft, loadDraft, clearDraft, since } from "./lib/draft.js";
 import { ROLE, INSTALL_CMD } from "./lib/role.js";
+import { powershellCommand, releaseEntries } from "./lib/changelog.js";
+import { CHANGELOG } from "./lib/changelog-data.js";
+import { openChangelog } from "./lib/changelog-view.js";
 import { initUx, loadUx, uxData, uxViewState, uxApplyViewState, renderUxBoard, renderUxDeliveries, renderUxDemand, renderUxToday, renderUxProgress } from "./design-ux.js";
 import { loadAccent } from "./lib/theme.js";
 import { initFloat, popOutFromPanel } from "./lib/float.js";
@@ -158,8 +162,8 @@ const state = {
   storyPoints: 1,          // null = não alterar
   endAnchor: null,         // horário de término INFORMADO (o campo pode exibir o valor ajustado à jornada)
   startAnchor: null,       // horário de início INFORMADO
-  echo: { start: null, end: null },  // valores escritos pela extensão nos campos (não são entrada do usuário)
-  timeMode: "end",         // "end": fim conhecido → início = fim − trabalhado · "start": início conhecido · "auto": 1º horário livre
+  timeMode: "end",         // "range": início + fim → duração · "end" / "start": duração → horário · "auto": jornada
+  estimateManual: false,   // uma estimativa ajustada pela pessoa não é sobrescrita pelo intervalo
   spaces: { batch: blankSpace(), sustentacao: blankSpace() },
   lastResult: null,
   dayDate: todayISO(),
@@ -174,6 +178,7 @@ const formValues = () => ({
   ...Object.fromEntries(FORM_IDS.map((id) => [id, $(id).value])),
   storyPoints: state.storyPoints,
   timeMode: state.timeMode,
+  estimateManual: state.estimateManual,
 });
 
 function snapshot() {
@@ -305,7 +310,7 @@ function setMode(mode, { restoring = false } = {}) {
     if (mode === "demands") loadDemands();
   } else if (mode === "day") {
     showForm(false);
-    loadDay(state.dayDate);
+    loadDay(QP.period === "yesterday" ? qpYesterday() : QP.period === "day" ? QP.day : QP.period === "today" ? todayISO() : state.dayDate);
   } else if (mode === "panel") {
     showForm(false);
     loadPanel();
@@ -321,7 +326,6 @@ function setMode(mode, { restoring = false } = {}) {
   } else {
     showForm(!!state.selected);
     if (state.selected) applySingleContext(state.selected, null, { keepValues: true });
-    renderRecent();
   }
   $("scroll").scrollTop = 0;
   if (!restoring) touch();
@@ -446,6 +450,7 @@ async function moveDemand(ctx, t, stage, btn) {
     const res = await send("MOVE_ISSUE", { key: ctx.key, transitionId: t.id });
     toast(`${ctx.key} agora está em ${res.status || stage.label}.`, "ok");
     state.panel.data = null;
+    invalidateActivity();
     await selectSubtask(ctx.key);   // relê transições, status e o fluxo
   } catch (e) {
     toast(e.message);
@@ -459,6 +464,14 @@ async function moveDemand(ctx, t, stage, btn) {
 const AM = { open: false, home: null, next: null, opener: null };
 
 function amKey(e) {
+  if (e.key === "Tab") {
+    const controls = [...$("applyModal").querySelectorAll('button, input, select, textarea, [tabindex="0"]')]
+      .filter((node) => !node.disabled && node.getClientRects().length);
+    const first = controls[0], last = controls.at(-1);
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+    return;
+  }
   if (e.key !== "Escape") return;
   e.stopPropagation();
   e.preventDefault();
@@ -466,7 +479,8 @@ function amKey(e) {
 }
 
 function openApplyModal() {
-  if (!state.selected || state.mode !== "single") return;
+  const lote = isSpace(state.mode);
+  if (lote ? !space().targets.length : (!state.selected || state.mode !== "single")) return;
   const f = $("formCard");
   if (!AM.open) {
     AM.home = f.parentNode;
@@ -475,11 +489,22 @@ function openApplyModal() {
     $("amBody").append(f);
   }
   AM.open = true;
-  $("amTitle").textContent = `Apontar em ${state.selected.key}`;
-  $("amSub").textContent = state.selected.summary;
+  $("amSide").classList.toggle("hidden", !lote);
+  $("applyModal").classList.toggle("wide", lote);
+  if (lote) {
+    $("amTitle").textContent = `Apontar no lote ${SPACE_LABEL[state.spaceId]}`;
+    renderAmSide();
+    updateBatchCount();
+  } else {
+    $("amTitle").textContent = `Apontar em ${state.selected.key}`;
+    $("amSub").textContent = state.selected.summary;
+  }
   $("amApply").textContent = $("btnApply").textContent;
+  $("amApply").disabled = $("btnApply").disabled;
   f.classList.remove("hidden");
   $("applyModal").classList.remove("hidden");
+  $("amBody").scrollTop = 0;
+  refreshWorkday({ delay: 0 });
   document.addEventListener("keydown", amKey, true);
   setTimeout(() => $("spent").focus(), 30);
 }
@@ -499,22 +524,127 @@ $("amClose").addEventListener("click", closeApplyModal);
 $("amCancel").addEventListener("click", closeApplyModal);
 $("applyModal").addEventListener("mousedown", (e) => { if (e.target === $("applyModal")) closeApplyModal(); });
 $("amApply").addEventListener("click", async () => {
-  const key = state.selected?.key;
+  const lote = isSpace(state.mode);
+  const key = lote ? null : state.selected?.key;
   $("amApply").disabled = true;
   try {
     const res = await apply();
     if (!res) return;
     closeApplyModal();
     if (key) await selectSubtask(key);   // status e horas novos no fluxo
-  } finally { $("amApply").disabled = false; }
+  } finally { $("amApply").disabled = lote ? !space().checked.length : false; }
 });
+$("btnBatchModal").addEventListener("click", openApplyModal);
+
+/* ---------- Lote: lateral do modal com as subtarefas e a tarefa pai de cada uma ---------- */
+
+/** Liga ou desliga um item do lote (subtarefa ou tarefa pai) e mantém a lista da página igual. */
+function toggleBatchKey(key, on) {
+  const sp = space();
+  const set = new Set(sp.checked);
+  on ? set.add(key) : set.delete(key);
+  sp.checked = [...set];
+  renderBatchList();
+  renderAmSide();
+  updateTimeHint();
+  refreshWorkday();
+  touch();
+}
+
+/** A tarefa pai entra no lote: lê o contexto dela (campos, transições) uma vez. */
+async function toggleBatchParent(parentKey, on, cb) {
+  const sp = space();
+  sp.parentTargets = sp.parentTargets || [];
+  if (on && !sp.parentTargets.some((t) => t.key === parentKey)) {
+    cb.disabled = true;
+    try {
+      const data = await send("RESOLVE_BATCH", { keys: [parentKey], level: "parent" });
+      const t = data.targets?.[0];
+      if (!t) throw new Error(`não deu para ler ${parentKey}`);
+      sp.parentTargets.push({ ...t, isParentTarget: true });
+      // status que a tarefa pai pode receber entram na lista de status
+      for (const st of data.statuses || []) if (!sp.statuses.some((x) => x.name === st.name)) sp.statuses.push({ ...st, count: 0 });
+    } catch (e) { toast(e.message); cb.checked = false; cb.disabled = false; return; }
+  }
+  toggleBatchKey(parentKey, on);
+}
+
+function renderAmSide() {
+  if (!AM.open || !isSpace(state.mode)) return;
+  const sp = space();
+  const side = $("amSide");
+  const checked = new Set(sp.checked);
+  const scroll = side.scrollTop;
+  side.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "am-side-h";
+  const n = sp.checked.length;
+  head.innerHTML = "<b>Onde aplicar</b><span></span>";
+  head.querySelector("span").textContent = `${n} ${n === 1 ? "item" : "itens"}`;
+  const mini = document.createElement("div");
+  mini.className = "mini am-side-mini";
+  for (const [label, fn] of [["Todas", () => sp.targets.map((t) => t.key)], ["Minhas", () => sp.targets.filter((t) => t.assigneeId && t.assigneeId === sp.me?.accountId).map((t) => t.key)], ["Nenhuma", () => []]]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      const parents = sp.checked.filter((k) => (sp.parentTargets || []).some((t) => t.key === k));
+      sp.checked = [...new Set([...fn(), ...(label === "Nenhuma" ? [] : parents)])];
+      renderBatchList(); renderAmSide(); updateTimeHint(); refreshWorkday(); touch();
+    });
+    mini.append(b);
+  }
+  side.append(head, mini);
+  const item = (key, summary, sub, { parent = false, cb: onChange }) => {
+    const row = document.createElement("label");
+    row.className = `am-it${parent ? " par" : ""}${checked.has(key) ? " sel" : ""}`;
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = checked.has(key);
+    cb.addEventListener("change", () => onChange(cb));
+    const txt = document.createElement("span");
+    txt.className = "am-it-t";
+    const k = document.createElement("b");
+    k.textContent = key;
+    const s = document.createElement("span");
+    s.textContent = summary || "";
+    txt.append(k, s);
+    const small = document.createElement("small");
+    small.textContent = sub || "";
+    row.append(cb, txt, small);
+    row.title = `${key} · ${summary || ""}`;
+    return row;
+  };
+  if (sp.level === "parent") {
+    for (const t of sp.targets) side.append(item(t.key, t.summary, t.status, { parent: true, cb: (cb) => toggleBatchKey(t.key, cb.checked) }));
+    side.scrollTop = scroll;
+    return;
+  }
+  const groups = new Map();
+  for (const t of sp.targets) {
+    const g = t.parentKey || "";
+    if (!groups.has(g)) groups.set(g, { key: g, summary: t.parentSummary || "", subs: [] });
+    groups.get(g).subs.push(t);
+  }
+  for (const g of groups.values()) {
+    const box = document.createElement("div");
+    box.className = "am-grp";
+    if (g.key) box.append(item(g.key, g.summary, "tarefa pai", { parent: true, cb: (cb) => toggleBatchParent(g.key, cb.checked, cb) }));
+    for (const t of g.subs) box.append(item(t.key, t.summary, t.status, { cb: (cb) => toggleBatchKey(t.key, cb.checked) }));
+    side.append(box);
+  }
+  side.scrollTop = scroll;
+}
 
 function showForm(on) {
   const single = state.mode === "single";
-  if (!single || !on) closeApplyModal();
+  const lote = isSpace(state.mode);
+  const inModal = single || lote;   // Tarefa e Lote apontam pelo modal
+  if (!inModal || !on) closeApplyModal();
   $("demandFlow").classList.toggle("hidden", !(on && single));
-  $("formCard").classList.toggle("hidden", !on || (single && !AM.open));
-  $("actionBar").classList.toggle("hidden", !on || single);
+  $("batchApplyBar").classList.toggle("hidden", !(on && lote));
+  $("formCard").classList.toggle("hidden", !on || (inModal && !AM.open));
+  $("actionBar").classList.toggle("hidden", !on || inModal);
 }
 
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => setMode(t.dataset.mode)));
@@ -573,6 +703,7 @@ function updateStoryHint() {
 
 function setFormValues(v) {
   for (const id of FORM_IDS) if (v[id] !== undefined) $(id).value = v[id];
+  if (v.estimate !== undefined) state.estimateManual = !!v.estimateManual;
   if ("storyPoints" in v) state.storyPoints = v.storyPoints;
   if (v.timeMode) state.timeMode = v.timeMode;
   if (v.endTime !== undefined) state.endAnchor = hmToMin(v.endTime);
@@ -617,6 +748,11 @@ function updateEstimateMatch() {
   const sp = parseDuration($("spent").value);
   el.className = "match";
   if (!sp.ok || !sp.minutes) { el.textContent = ""; return; }
+  if (isSpace(state.mode) && !state.estimateManual) {
+    el.textContent = `Estimativas existentes mantidas; só preenche (${fmtDur(est.minutes || sp.minutes)}) nas demandas sem estimativa.`;
+    el.classList.add("info");
+    return;
+  }
   // Tarefa com estimativa: ela não muda sozinha — o trabalhado só acumula.
   const cur = !isSpace(state.mode) && state.selected ? state.selected.current : null;
   const curEst = cur ? parseDuration(cur.originalEstimate) : null;
@@ -684,8 +820,19 @@ function workedTotal() {
   return { total: p.minutes * n, each: p.minutes, n };
 }
 
+const formInterval = () => workInterval($("startTime").value, $("endTime").value,
+  isSpace(state.mode) ? Math.max(1, space().checked.length) : 1);
+
+/** O cálculo de horas só sugere uma estimativa quando a demanda ainda não tem uma. */
+function automaticEstimate(suggestion) {
+  const current = !isSpace(state.mode) ? state.selected?.current?.originalEstimate : "";
+  const parsed = parseDuration(current);
+  return parsed.ok && parsed.minutes > 0 ? current : suggestion;
+}
+
 /**
- * Mantém Começou/Terminou coerentes com o tempo trabalhado:
+ * Mantém horários e duração coerentes:
+ *  - modo "range": início e fim informados → trabalhado e estimativa automáticos
  *  - modo "end"  : você informa quando terminou (padrão: agora) → começou = terminou − trabalhado
  *  - modo "start": você informa quando começou → terminou = começou + trabalhado
  *  - modo "auto" : a extensão escolhe o 1º horário livre da jornada
@@ -703,6 +850,24 @@ function updateTimeHint() {
     && $("endTime").value === fmtHM(nowEnd()));
   $("startTime").classList.toggle("calc", mode === "end");
   $("endTime").classList.toggle("calc", mode === "start");
+
+  if (mode === "range") {
+    const interval = formInterval();
+    $("startTime").setAttribute("aria-invalid", String(!interval.ok));
+    $("endTime").setAttribute("aria-invalid", String(!interval.ok));
+    if (!interval.ok) {
+      hint.textContent = interval.error;
+      hint.classList.add("warn");
+      return;
+    }
+    $("spent").value = interval.jira;
+    if (!state.estimateManual) $("estimate").value = automaticEstimate(interval.jira);
+    refreshPreviews();
+    hint.textContent = `${$("startTime").value} → ${$("endTime").value} · ${fmtDur(interval.total)}${interval.count > 1 ? ` (${interval.count} × ${interval.jira}, em sequência)` : ""} · tempo calculado pelos horários.`;
+    return;
+  }
+  $("startTime").removeAttribute("aria-invalid");
+  $("endTime").removeAttribute("aria-invalid");
 
   if (mode === "auto") {
     writeTime("startTime", "");
@@ -724,8 +889,8 @@ function updateTimeHint() {
   if (!total) {
     if (mode === "end") writeTime("startTime", ""); else writeTime("endTime", "");
     hint.textContent = mode === "end"
-      ? `Terminou às ${fmtHM(anchor)} — informe o tempo trabalhado e o início é calculado.`
-      : `Começou às ${fmtHM(anchor)} — informe o tempo trabalhado e o fim é calculado.`;
+      ? `Terminou às ${fmtHM(anchor)} — informe o início para calcular o tempo, ou preencha o tempo trabalhado.`
+      : `Começou às ${fmtHM(anchor)} — informe o fim para calcular o tempo, ou preencha o tempo trabalhado.`;
     return;
   }
 
@@ -791,13 +956,32 @@ function updateTimeHint() {
 
 function writeTime(id, value) {
   $(id).value = value;
-  state.echo[id === "startTime" ? "start" : "end"] = value || null;
 }
 
 function setTimeMode(mode) {
   state.timeMode = mode;
   updateTimeHint();
   refreshWorkday({ delay: 0 });
+  touch();
+}
+
+function timeEdited(id) {
+  state.startAnchor = hmToMin($("startTime").value);
+  state.endAnchor = hmToMin($("endTime").value);
+  if (state.timeMode === "range" || ($("startTime").value && $("endTime").value)) setTimeMode("range");
+  else setTimeMode(id === "startTime" ? "start" : "end");
+}
+
+function spentEdited() {
+  if (state.timeMode === "range" && $("spent").value.trim()) {
+    // Uma duração ajustada manualmente mantém o início e recalcula o fim.
+    state.timeMode = "start";
+    state.startAnchor = hmToMin($("startTime").value);
+    if (!state.estimateManual) $("estimate").value = automaticEstimate($("spent").value);
+  }
+  updateTimeHint();
+  refreshPreviews();
+  refreshWorkday();
   touch();
 }
 
@@ -836,7 +1020,6 @@ async function findSubtasks() {
 }
 
 function renderSubtasks() {
-  if (!$("evidenceBody").classList.contains("hidden")) setTimeout(renderEvidenceTargets);
   const box = $("subtaskList");
   box.innerHTML = "";
   const rows = state.parent
@@ -944,7 +1127,30 @@ function applySingleContext(ctx, override = null, { keepValues = false } = {}) {
 function openCreate(which, open) {
   $(`create${which}Body`).classList.toggle("hidden", !open);
   if (open) $(which === "Single" ? "newSubtaskName" : "newSubtaskNameBatch").focus();
+  if (open && which === "Batch") fillAssignOther();
 }
+
+/** Pessoas que podem receber a subtarefa no projeto do Espaço (Lote › Criar subtarefa). */
+const assignCache = new Map();
+async function fillAssignOther() {
+  const sel = $("assignOtherBatch");
+  const proj = String(space().project || SPACE_LABEL[state.spaceId] || "").toUpperCase();
+  if (!proj || sel.dataset.proj === proj) return;
+  const keep = sel.value;
+  sel.innerHTML = `<option value="">Ninguém além de mim</option>`;
+  sel.dataset.proj = proj;
+  try {
+    const list = assignCache.get(proj) || await send("ASSIGNABLE_USERS", { project: proj });
+    assignCache.set(proj, list);
+    for (const u of list) { const o = document.createElement("option"); o.value = u.accountId; o.textContent = u.name; sel.append(o); }
+    sel.value = keep;
+  } catch (e) { sel.dataset.proj = ""; toast(`Não deu para listar as pessoas de ${proj}: ${e.message}`); }
+}
+$("assignOtherBatch").addEventListener("change", (e) => {
+  // outra pessoa escolhida: não atribui a mim
+  if (e.target.value) $("assignSelfBatch").checked = false;
+});
+$("assignSelfBatch").addEventListener("change", (e) => { if (e.target.checked) $("assignOtherBatch").value = ""; });
 $("btnShowCreateSingle").addEventListener("click", () => openCreate("Single", $("createSingleBody").classList.contains("hidden")));
 $("btnShowCreateBatch").addEventListener("click", () => openCreate("Batch", $("createBatchBody").classList.contains("hidden")));
 
@@ -978,6 +1184,7 @@ async function createBatchSubtasks() {
       parentKeys: keys,
       summary: $("newSubtaskNameBatch").value.trim(),
       assignToMe: $("assignSelfBatch").checked,
+      assignee: $("assignOtherBatch").value ? { accountId: $("assignOtherBatch").value, name: $("assignOtherBatch").selectedOptions[0]?.textContent || "" } : null,
       skipIfExists: $("skipDupBatch").checked,
     });
     openCreate("Batch", false);
@@ -1015,6 +1222,7 @@ function loadSpaceToUI(id) {
   document.querySelectorAll("#spaceSeg button").forEach((b) => b.classList.toggle("on", b.dataset.space === id));
   renderBoardOptions(sp.boardId);
   renderColumnPills();
+  applySpaceBoard();
   renderBoardList();
   renderBatchList();
   $("boardInfo").textContent = "";
@@ -1075,6 +1283,32 @@ document.querySelectorAll("#sourceSeg button").forEach((b) => b.addEventListener
 
 let boardsCache = null;
 
+/** O quadro do Espaço: o salvo, se for do mesmo projeto; senão o primeiro quadro do projeto. */
+function autoBoard(id = state.spaceId) {
+  const sp = state.spaces[id];
+  const proj = String(sp.project || SPACE_LABEL[id] || "").toUpperCase();
+  const boards = boardsCache || [];
+  const saved = boards.find((b) => String(b.id) === String(sp.boardId));
+  if (saved && (!saved.projectKey || String(saved.projectKey).toUpperCase() === proj)) return saved;
+  return boards.find((b) => String(b.projectKey || "").toUpperCase() === proj) || saved || null;
+}
+
+/** Aplica o quadro do Espaço e mostra o nome dele no título. */
+async function applySpaceBoard({ silent = true } = {}) {
+  const sp = space();
+  const b = autoBoard();
+  const id = b ? String(b.id) : "";
+  $("boardName").textContent = b ? (/quadro/i.test(b.name) ? b.name : `quadro ${b.name}`) : boardsCache ? "sem quadro: busca por status" : "";
+  if (id !== String(sp.boardId || "")) {
+    sp.boardId = id;
+    sp.pickedColumns = [];
+    sp.boardColumns = [];
+  }
+  renderBoardOptions(sp.boardId);
+  if (sp.boardId && !sp.boardColumns.length) await loadBoardColumns(sp.boardId, { silent });
+  else renderColumnPills();
+}
+
 function renderBoardOptions(selectedId) {
   const sel = $("boardSel");
   sel.innerHTML = `<option value="">Sem quadro — buscar por status</option>`;
@@ -1093,10 +1327,7 @@ async function initBoards({ force = false } = {}) {
   try {
     sel.disabled = true;
     if (!boardsCache || force) boardsCache = await send("LIST_BOARDS");
-    if (isSpace(state.mode)) {
-      renderBoardOptions(space().boardId);
-      if (space().boardId) await loadBoardColumns(space().boardId, { silent: true });
-    }
+    if (isSpace(state.mode)) await applySpaceBoard();
   } catch (e) {
     sel.innerHTML = `<option value="">Sem quadro — buscar por status</option>`;
     $("boardInfo").textContent = `Não consegui listar quadros: ${e.message}`;
@@ -1155,7 +1386,6 @@ $("btnReloadBoards").addEventListener("click", () => initBoards({ force: true })
 
 async function loadFromBoard() {
   const sp = space();
-  sp.boardId = $("boardSel").value || "";
   if (sp.boardId && !sp.pickedColumns.length) return toast("Marque ao menos uma coluna do quadro.");
   const statuses = parseColumns($("statusColumns").value || sp.columns);
   if (!sp.boardId && !statuses.length) return toast("Selecione um quadro ou informe os status.");
@@ -1255,6 +1485,7 @@ async function resolveBatch(keysOverride = null) {
   try {
     const data = await send("RESOLVE_BATCH", { keys, level: sp.level || "sub" });
     sp.targets = data.targets;
+    sp.parentTargets = [];
     sp.statuses = data.statuses;
     sp.me = data.me;
     const mine = data.targets.filter((t) => t.assigneeId && t.assigneeId === data.me.accountId);
@@ -1300,6 +1531,7 @@ function renderBatchList() {
       updateBatchCount();
       updateTimeHint();
       refreshWorkday();
+      renderAmSide();
       touch();
     });
     row.querySelector(".k").textContent = t.key;
@@ -1323,13 +1555,21 @@ function renderBatchErrors(errors) {
 function updateBatchCount() {
   const sp = space();
   const n = sp.checked.length;
-  const noun = sp.level === "parent" ? ["tarefa", "tarefas"] : ["subtarefa", "subtarefas"];
+  const withParent = sp.level !== "parent" && sp.checked.some((k) => (sp.parentTargets || []).some((t) => t.key === k));
+  const noun = sp.level === "parent" ? ["tarefa", "tarefas"] : withParent ? ["item", "itens"] : ["subtarefa", "subtarefas"];
   $("batchCount").textContent = sp.targets.length
     ? `${n} de ${sp.targets.length} ${noun[1]} selecionadas`
     : sp.level === "parent" ? "Escolha as tarefas acima." : "Escolha as tarefas acima e carregue as subtarefas.";
   if (isSpace(state.mode)) {
     $("btnApply").textContent = n ? `Aplicar em ${n} ${n === 1 ? noun[0] : noun[1]}` : `Selecione ${noun[1]}`;
     $("btnApply").disabled = !n;
+    $("btnBatchModal").textContent = n ? `Apontar e atualizar ${n} ${n === 1 ? noun[0] : noun[1]}` : `Selecione ${noun[1]}`;
+    $("btnBatchModal").disabled = !n;
+    if (AM.open) {
+      $("amApply").textContent = $("btnApply").textContent;
+      $("amApply").disabled = !n;
+      $("amSub").textContent = n ? `${n} ${n === 1 ? noun[0] : noun[1]} recebem os mesmos valores` : "Marque ao lado onde aplicar";
+    }
   }
 }
 
@@ -1380,6 +1620,13 @@ function refreshWorkday({ force = false, delay = 450 } = {}) {
   wdTimer = setTimeout(async () => {
     if ($("formCard").classList.contains("hidden")) return;
     const seq = ++wdSeq;
+    if (state.timeMode === "range" && !formInterval().ok) {
+      const box = $("workdayBox");
+      box.replaceChildren(el("h2", "wd-title", "Linha do tempo"));
+      note(box, "warn", formInterval().error);
+      box.classList.remove("hidden");
+      return;
+    }
     const raw = $("spent").value.trim();
     if (!parseDuration(raw).ok) return;
     try {
@@ -1502,6 +1749,7 @@ function legend(items) {
 function renderWorkday(plan) {
   const box = $("workdayBox");
   box.innerHTML = "";
+  box.appendChild(el("h2", "wd-title", "Linha do tempo"));
   const wd = { start: plan.workday.start, end: plan.workday.end };
   const cap = plan.workday.capMinutes;
   const goal = DEF.workday.goal;
@@ -1795,32 +2043,55 @@ async function setQaPeriod(p, day = "") {
   if (state.mode === "day") loadDay(QP.period === "yesterday" ? qpYesterday() : QP.period === "day" ? QP.day : QP.period === "today" ? todayISO() : state.dayDate);
 }
 
-/* ---------- Demandas em que você atuou, em qualquer status (Painel › Todas e Tarefa › recentes) ---------- */
+/* ---------- Demandas em que você atuou, em qualquer status (Painel › Todas e Meu dia › recentes) ---------- */
 
-const ACT = { data: null, seq: 0, recent: "today" };
-try { ACT.recent = localStorage.getItem("qf.recent") || "today"; } catch { /* sem storage */ }
+const ACT = { data: null, seq: 0, loading: false, error: null, stale: false };
+
+function invalidateActivity() {
+  ACT.stale = true;
+  ACT.seq++; // uma leitura anterior à alteração não pode repor dados antigos
+  ACT.loading = false;
+  chrome.storage.local.remove("qaActivity").catch(() => {});
+}
 
 async function loadActivity({ force = false } = {}) {
+  if (ACT.loading && !force) return;
+  force = force || ACT.stale;
+  ACT.loading = true;
+  ACT.error = null;
   const seq = ++ACT.seq;
   if (!ACT.data) {
-    try { const { qaActivity } = await chrome.storage.local.get({ qaActivity: null }); if (qaActivity?.issues && !ACT.data) ACT.data = qaActivity; } catch { /* sem cache */ }
+    try {
+      const { qaActivity } = await chrome.storage.local.get({ qaActivity: null });
+      if (seq !== ACT.seq) return;
+      if (qaActivity?.issues && !ACT.data) ACT.data = qaActivity;
+    } catch { /* sem cache */ }
     if (ACT.data) activityRendered();
   }
-  if (!force && ACT.data && Date.now() - ACT.data.generatedAt < 2 * 60 * 1000) return activityRendered();
+  if (!force && ACT.data && Date.now() - ACT.data.generatedAt < 2 * 60 * 1000) {
+    ACT.loading = false;
+    return activityRendered();
+  }
   try {
     const data = await send("MY_ACTIVITY", { force });
     if (seq !== ACT.seq) return;
     ACT.data = data;
+    ACT.stale = false;
     chrome.storage.local.set({ qaActivity: data }).catch(() => {});
     activityRendered();
   } catch (e) {
+    if (seq !== ACT.seq) return;
+    ACT.error = e.message;
     if (state.mode === "panel" && state.panel.scope === "all" && !ACT.data) { $("panelBox").innerHTML = ""; note($("panelBox"), "err", e.message); }
+    else if (state.mode === "day") renderRecent();
     else toast(e.message);
+  } finally {
+    if (seq === ACT.seq) ACT.loading = false;
   }
 }
 function activityRendered() {
   if (state.mode === "panel" && state.panel.scope === "all") renderPanel();
-  if (state.mode === "single") renderRecent();
+  if (state.mode === "day") renderRecent();
 }
 
 const dayLabel = (iso) => (iso === todayISO() ? "Hoje" : iso === addDaysIso(todayISO(), -1) ? "Ontem" : dayShort(iso));
@@ -1840,8 +2111,14 @@ function activityRow(it, url) {
   const line = issueLine(it, right, bits.join(" · "), url);
   line.querySelector(".m-row-top").prepend(el("span", `tt ${it.isSubtask ? "tt-sub" : "tt-task"}`, it.isSubtask ? "Sub" : "Pai"));
   line.classList.add("clickable");
+  line.tabIndex = 0;
+  line.setAttribute("role", "button");
+  line.setAttribute("aria-label", `Abrir ${it.key}: ${it.summary}`);
   line.title = "Abrir na aba Tarefa";
   line.addEventListener("click", () => openFromPanel(it));
+  line.addEventListener("keydown", (e) => {
+    if (e.target === line && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openFromPanel(it); }
+  });
   return line;
 }
 
@@ -1876,19 +2153,29 @@ function renderActivity(box) {
   if (ACT.data.truncated) note(box, "warn", "Mais de 300 demandas nos últimos 30 dias: mostrando as atualizadas mais recentemente.");
 }
 
-/** Aba Tarefa: as últimas demandas em que você atuou (Hoje · Ontem · 7 dias), para abrir com um clique. */
+/** Meu dia: segue o mesmo espaço e período do restante da tela. */
 function renderRecent() {
   if (ROLE !== "qa") return;
   const box = $("recentBox");
   box.innerHTML = "";
-  document.querySelectorAll("#recentPeriod button").forEach((b) => b.classList.toggle("on", b.dataset.p === ACT.recent));
-  if (!ACT.data) { box.appendChild(el("p", "muted xs", "Carregando…")); loadActivity(); return; }
-  const t = todayISO(), y = businessStep(t, -1);
-  const pick = (i) => { const d = isoOfMs(i.updated); return ACT.recent === "today" ? d === t : ACT.recent === "yesterday" ? d === y : d >= addDaysIso(t, -6); };
-  const list = ACT.data.issues.filter(pick);
+  $("recentInfo").textContent = qpLabel();
+  $("recentAll").hidden = !ACT.data;
+  if (ACT.error) {
+    note(box, "err", `Não foi possível atualizar suas demandas: ${ACT.error}`);
+    const retry = el("button", "link", "Tentar novamente");
+    retry.addEventListener("click", () => { loadActivity({ force: true }); renderRecent(); });
+    box.appendChild(retry);
+    if (ACT.data) box.appendChild(el("p", "muted xs", `Última atualização: ${since(ACT.data.generatedAt)}.`));
+    else return;
+  }
+  if (!ACT.data) { box.appendChild(el("p", "muted xs", "Carregando suas demandas…")); return; }
+  const list = ACT.data.issues.filter((i) => inSpace(i.key) && inQp(i.updated))
+    .sort((a, b) => b.updated - a.updated);
   for (const it of list.slice(0, 8)) box.appendChild(activityRow(it, ACT.data.url));
-  if (!list.length) box.appendChild(el("p", "muted xs", ACT.recent === "today" ? "Nenhuma demanda sua atualizada hoje ainda." : "Nada nesse período."));
-  $("recentAll").textContent = list.length > 8 ? `ver as ${list.length} no Painel` : "ver no Painel";
+  if (!list.length) box.appendChild(el("p", "muted xs", `Nenhuma demanda sua atualizada ${qpLabel()}${gspace.project ? ` em ${gspace.project}` : ""}.`));
+  $("recentInfo").textContent = `${list.length} ${pl(list.length, "demanda", "demandas")} · ${qpLabel()}`;
+  $("recentAll").textContent = list.length > 8 ? `Ver as ${list.length} no Painel` : "Ver no Painel";
+  if (ACT.data.truncated) note(box, "warn", "Lista limitada às 300 demandas mais recentes. Consulte o Painel para refinar a busca.");
 }
 
 function renderPanel() {
@@ -2159,16 +2446,16 @@ $("panelScope").addEventListener("click", (e) => {
   renderPanel();
   if (state.panel.scope === "all") loadActivity();
 });
-$("recentPeriod").addEventListener("click", (e) => {
-  const b = e.target.closest("button");
-  if (!b) return;
-  ACT.recent = b.dataset.p;
-  try { localStorage.setItem("qf.recent", ACT.recent); } catch { /* sem storage */ }
-  renderRecent();
-});
 $("recentAll").addEventListener("click", () => {
+  state.panel.restored = true; // este atalho define os filtros; não restaura uma consulta antiga
   state.panel.scope = "all";
-  setQaPeriod(ACT.recent === "today" ? "today" : ACT.recent === "yesterday" ? "yesterday" : "7");
+  state.panel.project = gspace.project;
+  state.panel.type = "all";
+  state.panel.q = "";
+  state.panel.status = "";
+  state.panel.kpi = "";
+  state.panel.quick = "";
+  $("panelSearch").value = "";
   setMode("panel");
 });
 try { $("sprintWrap").open = localStorage.getItem("qf.sprintWrap") === "1"; } catch { /* sem storage */ }
@@ -3182,7 +3469,10 @@ async function loadDay(date, { force = false } = {}) {
   $("dayDate").value = date;
   $("dayNext").disabled = date >= todayISO();
   const seq = ++daySeq;
+  renderRecent();
+  if (ROLE === "qa") loadActivity({ force });
   $("dayBox").innerHTML = `<p class="muted xs">Carregando ${dayShort(date)}…</p>`;
+  $("dayHistoryBox").innerHTML = "";
   try {
     const rep = await send("DAY_REPORT", { date, days: qpDays(), force });
     if (seq === daySeq) renderDay(rep);
@@ -3198,6 +3488,9 @@ function renderDay(rawRep) {
   const rep = scopedDay(rawRep);
   const box = $("dayBox");
   box.innerHTML = "";
+  const historyBox = $("dayHistoryBox");
+  historyBox.innerHTML = "";
+  renderRecent();
   const { goal, cap, start, end } = rep.workday;
   const tot = rep.total + mtgMin(rep.date);   // apontado + reuniões marcadas
   state.dayView = { date: rep.date, total: tot, goal };   // janela flutuante: o minimizado mostra o dia filtrado
@@ -3245,44 +3538,6 @@ function renderDay(rawRep) {
   box.appendChild(hero);
   if (MTG_ON) box.appendChild(meetingsCard(rep.date, { onChange: rerenderMeetings }));
 
-  /* --- demandas do dia --- */
-  const list = document.createElement("div");
-  list.className = "card";
-  const lt = document.createElement("div");
-  lt.className = "card-t";
-  lt.append(document.createTextNode("Demandas trabalhadas"));
-  const lts = document.createElement("span");
-  lts.textContent = rep.issues.length ? `${fmtDur(rep.total)} no total` : "";
-  lt.appendChild(lts);
-  list.appendChild(lt);
-
-  if (!rep.issues.length) {
-    const e = document.createElement("div");
-    e.className = "empty";
-    e.innerHTML = `<b>☕</b>Nenhum apontamento seu neste dia.`;
-    list.appendChild(e);
-  }
-  for (const it of rep.issues) {
-    const a = document.createElement("a");
-    a.className = "work";
-    a.href = `${rep.url}/browse/${it.key}`;
-    a.target = "_blank";
-    a.innerHTML = `<span class="dot"></span><span class="k"></span><span class="t"></span><span class="s"></span><span class="h"></span>`;
-    a.querySelector(".dot").style.background = colorOf.get(it.key);
-    const k = a.querySelector(".k");
-    k.textContent = it.key;
-    const st = document.createElement("em");
-    st.className = "stx" + (it.statusCategory === "done" ? " done" : "");
-    st.textContent = it.status;
-    k.appendChild(st);
-    a.querySelector(".t").textContent = fmtDur(it.minutes);
-    a.querySelector(".s").textContent = it.summary || it.key;
-    a.querySelector(".h").textContent =
-      it.slots.map((s) => `${fmtHM(s.start)}–${fmtHM(s.end)}`).join("  ") + (it.parentKey ? `  ·  ${it.parentKey}` : "");
-    list.appendChild(a);
-  }
-  box.appendChild(list);
-
   /* --- histórico dos dias úteis --- */
   const h = document.createElement("div");
   h.className = "card";
@@ -3322,22 +3577,25 @@ function renderDay(rawRep) {
     const lab = document.createElement("small");
     lab.textContent = dense ? d.date.slice(8, 10) : `${d.date.slice(8, 10)}/${d.date.slice(5, 7)}`;
     col.append(bar, lab);
-    col.addEventListener("click", () => loadDay(d.date));
+    col.addEventListener("click", () => selectDay(d.date));
     chart.appendChild(col);
   }
   h.appendChild(chart);
   h.appendChild(legend([["var(--ok)", "meta batida"], ["var(--data)", "abaixo da meta"], ["var(--surface-3)", "sem apontamento"]]));
-  box.appendChild(h);
+  historyBox.appendChild(h);
 
   if (rep.date === todayISO()) updateDayPill(rawRep.total, goal);
   if (rep.scopedTo) note(box, "info", `Mostrando só ${rep.scopedTo}. A pílula do topo soma todos os espaços.`);
 }
 
-$("dayPrev").addEventListener("click", () => loadDay(businessStep(state.dayDate, -1)));
-$("dayNext").addEventListener("click", () => { const n = businessStep(state.dayDate, 1); if (n <= todayISO()) loadDay(n); });
-$("dayToday").addEventListener("click", () => loadDay(todayISO()));
+function selectDay(date) {
+  setQaPeriod(date === todayISO() ? "today" : "day", date);
+}
+$("dayPrev").addEventListener("click", () => selectDay(businessStep(state.dayDate, -1)));
+$("dayNext").addEventListener("click", () => { const n = businessStep(state.dayDate, 1); if (n <= todayISO()) selectDay(n); });
+$("dayToday").addEventListener("click", () => selectDay(todayISO()));
 $("dayRefresh").addEventListener("click", () => loadDay(state.dayDate, { force: true }));
-$("dayDate").addEventListener("change", () => { const v = $("dayDate").value; if (v) loadDay(v > todayISO() ? todayISO() : v); });
+$("dayDate").addEventListener("change", () => { const v = $("dayDate").value; if (v) selectDay(v > todayISO() ? todayISO() : v); });
 
 /* ---------- pílula do topo ---------- */
 
@@ -3380,19 +3638,25 @@ $("dayPill").addEventListener("click", () => {
    Aplicar
    ===================================================================== */
 
-const commonPayload = () => ({
-  dueDate: $("dueDate").value || null,
-  startDate: $("startDate").value || null,
-  startTime: $("startTime").value || "",
-  originalEstimate: $("estimate").value.trim(),
-  timeSpent: $("spent").value.trim(),
-  worklogComment: $("worklogComment").value.trim(),
-  storyPoints: state.storyPoints,
-});
+const commonPayload = () => {
+  const interval = state.timeMode === "range" ? formInterval() : null;
+  if (interval && !interval.ok) throw new Error(interval.error);
+  return {
+    dueDate: $("dueDate").value || null,
+    startDate: $("startDate").value || null,
+    startTime: $("startTime").value || "",
+    originalEstimate: $("estimate").value.trim() || (interval ? automaticEstimate(interval.jira) : ""),
+    preserveExistingEstimate: !state.estimateManual,
+    timeSpent: $("spent").value.trim() || interval?.jira || "",
+    worklogComment: $("worklogComment").value.trim(),
+    storyPoints: state.storyPoints,
+  };
+};
 
 async function apply() {
   if (VIEW_TABS.includes(state.mode) || $("formCard").classList.contains("hidden")) return;
   toast(null);
+  if (state.timeMode === "range" && !formInterval().ok) return toast(formInterval().error);
   return isSpace(state.mode) ? applyBatch() : applySingle();
 }
 
@@ -3403,6 +3667,7 @@ async function afterApply() {
   refreshWorkday({ force: true, delay: 0 });
   refreshDayPill(true);
   state.panel.data = null;    // horas e status mudaram: o painel recarrega na próxima abertura
+  invalidateActivity();      // Meu dia relê as demandas após o apontamento
   $("result").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
@@ -3446,7 +3711,7 @@ async function applySingle() {
 async function applyBatch() {
   const sp = space();
   const checked = new Set(sp.checked);
-  const targets = sp.targets.filter((t) => checked.has(t.key));
+  const targets = [...sp.targets, ...(sp.parentTargets || [])].filter((t) => checked.has(t.key));
   if (!targets.length) return toast("Marque ao menos uma subtarefa.");
   const c = commonPayload();
   if (!c.dueDate && !c.originalEstimate && !c.timeSpent && !$("statusSel").value && c.storyPoints == null) {
@@ -3468,10 +3733,12 @@ async function applyBatch() {
     });
     state.lastResult = { kind: "batch", data: res };
     renderBatchResult(res);
-    toast(`${res.succeeded} de ${res.total} subtarefas atualizadas.`, res.succeeded === res.total ? "ok" : "err");
+    toast(`${res.succeeded} de ${res.total} itens atualizados.`, res.succeeded === res.total ? "ok" : "err");
     await afterApply();
     touch();
+    return res;
   } catch (e) { toast(e.message); } finally { busy(false); $("batchProgress").classList.add("hidden"); }
+  return null;
 }
 
 /* ---------- resultados ---------- */
@@ -6202,7 +6469,7 @@ function renderQaQueue() {
     for (const { i, age } of list.slice(0, 40)) {
       const right = el("span", "dm-right");
       const test = el("button", "btn xs-btn", "Testar");
-      test.dataset.tip = "Abre na aba Tarefa para apontar e registrar a evidência";
+      test.dataset.tip = "Abre na aba Tarefa para apontar e atualizar a demanda";
       test.addEventListener("click", (e) => { e.stopPropagation(); openFromPanel({ key: i.key, parentKey: i.isSubtask ? i.parentKey : null }); });
       right.append(test, prioPill(i.priority), el("span", "m-row-r", age ? `${age}d` : "hoje"));
       const line = issueLine(i, right, `${i.status.name}${i.sentBy ? ` · enviado por ${i.sentBy}` : ""}${i.assignee ? ` · ${i.assignee.name}` : ""}${i.parentKey ? ` · ↳ ${i.parentKey}` : ""}`, d.url);
@@ -6227,53 +6494,6 @@ $("qqWho").addEventListener("click", (e) => {
   renderQaQueue();
 });
 
-/* ---------- Evidência de teste (aba Tarefa) ---------- */
-
-const EV = { result: "approved" };
-
-function renderEvidenceTargets() {
-  const sel = $("evTarget");
-  const prev = sel.value;
-  sel.innerHTML = "";
-  if (state.parent?.key) sel.appendChild(new Option(`Tarefa pai · ${state.parent.key}`, state.parent.key));
-  if (state.selected?.key && state.selected.key !== state.parent?.key) sel.appendChild(new Option(`Selecionada · ${state.selected.key}`, state.selected.key));
-  if (!sel.options.length) sel.appendChild(new Option("Busque uma tarefa primeiro", ""));
-  if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
-}
-
-function setEvResult(r) {
-  EV.result = r;
-  document.querySelectorAll("#evResult button").forEach((b) => b.classList.toggle("on", b.dataset.r === r));
-  $("evReject").classList.toggle("hidden", r !== "rejected");
-  $("btnEvidence").textContent = r === "rejected" ? "Registrar reprovação" : "Registrar aprovação";
-}
-
-$("btnShowEvidence").addEventListener("click", () => {
-  const body = $("evidenceBody");
-  body.classList.toggle("hidden");
-  if (!body.classList.contains("hidden")) {
-    renderEvidenceTargets();
-    const sel = $("evCategory");
-    if (!sel.options.length) for (const c of String(DEF.qaRejectCategories || "").split(",").map((x) => x.trim()).filter(Boolean)) sel.appendChild(new Option(c, c));
-  }
-});
-$("evResult").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setEvResult(b.dataset.r); });
-$("btnEvidence").addEventListener("click", async () => {
-  const key = $("evTarget").value;
-  if (!key) return toast("Busque uma tarefa primeiro.");
-  if (EV.result === "rejected" && !$("evReason").value.trim()) return toast("Descreva o motivo da reprovação.");
-  busy(true);
-  try {
-    const res = await send("POST_EVIDENCE", {
-      key, result: EV.result, env: $("evEnv").value.trim(), steps: $("evSteps").value, link: $("evLink").value.trim(),
-      category: $("evCategory").value, reason: $("evReason").value.trim(),
-    });
-    const bad = res.steps.filter((s) => !s.ok);
-    toast(bad.length ? `${key}: comentário registrado, mas ${bad.map((s) => `${s.step} — ${s.detail}`).join("; ")}` : `Evidência registrada em ${key}.`, bad.length ? "err" : "ok");
-    $("evSteps").value = ""; $("evReason").value = ""; $("evLink").value = "";
-  } catch (e) { toast(e.message); } finally { busy(false); }
-});
-
 /* =====================================================================
    Ligações
    ===================================================================== */
@@ -6287,7 +6507,6 @@ const FRESH_KEY = `qfFresh:${ROLE}`;
 const RESUME = { active: false, fresh: new Set(), maxAge: 10 * 60 * 1000, quitting: false };
 const takeFresh = (k) => RESUME.fresh.delete(k);
 const canSkipFetch = (data, force) => !force && RESUME.active && !!data && Date.now() - (data.generatedAt || data.fetchedAt || 0) < RESUME.maxAge;
-const EV_IDS = ["evEnv", "evSteps", "evLink", "evReason", "evCategory", "evTarget"];
 
 function viewSnapshot() {
   const v = { savedAt: Date.now(), mode: state.mode, scroll: $("scroll").scrollTop, teamDate: team.date };
@@ -6295,8 +6514,7 @@ function viewSnapshot() {
     pStage: [...SC.pStage], treeAll: SC.treeAll, deploy: SC.deployDraft || null };
   if (ROLE === "design") { v.ds = { open: [...DS.open], drafts: DS.drafts }; v.ux = uxViewState(); }
   if (HAS_PROG) v.dv = { date: DV.date };
-  if (ROLE === "qa") v.qa = { qqWho: QQ.who, dayDate: state.dayDate, evOpen: !$("evidenceBody").classList.contains("hidden"),
-    evResult: EV.result, ev: Object.fromEntries(EV_IDS.map((id) => [id, $(id).value])) };
+  if (ROLE === "qa") v.qa = { qqWho: QQ.who, dayDate: state.dayDate };
   return v;
 }
 async function saveView() {
@@ -6342,7 +6560,7 @@ function applyViewState(v) {
   }
 }
 
-/** Depois de desenhar: rolagem, formulário de deploy e evidência. */
+/** Depois de desenhar: rolagem e formulário de deploy. */
 function applyViewAfter(v) {
   let tries = 0;
   let waiting = !!v.sc?.deploy;   // o formulário de deploy reabre antes de rolar (senão a tela desloca)
@@ -6363,15 +6581,6 @@ function applyViewAfter(v) {
       else waiting = false;
     };
     reopen();
-  }
-  if (v.qa) {
-    for (const [id, val] of Object.entries(v.qa.ev || {})) if (val != null && id !== "evTarget" && id !== "evCategory") $(id).value = val;
-    if (v.qa.evOpen) {
-      $("btnShowEvidence").click();
-      if (v.qa.ev?.evCategory) $("evCategory").value = v.qa.ev.evCategory;
-      if (v.qa.ev?.evTarget) $("evTarget").value = v.qa.ev.evTarget;
-    }
-    if (v.qa.evResult) setEvResult(v.qa.evResult);
   }
 }
 
@@ -6441,11 +6650,23 @@ $("btnLayout").addEventListener("click", async () => {
 }
 
 /* ---------- Aviso de nova versão (repositório da equipe) ---------- */
-/** Comando de instalação com o id desta extensão: além de atualizar, libera o botão "Atualizar agora". */
-function activationCommand(base = INSTALL_CMD) {
-  if (!base) return "";
-  return base.replace('-Command "', `-Command "$env:QF_EXT_ID='${chrome.runtime.id}'; `);
+let changelogUpdate = null;
+let checkingChangelog = false;
+const localChangelogId = `${ROLE}:${chrome.runtime.getManifest().version}:${CHANGELOG.build?.id || "release"}`;
+function showChangelog() {
+  const u = changelogUpdate || {};
+  const base = u.installCommand || INSTALL_CMD;
+  const opened = openChangelog({ name: ROLE_NAME, current: chrome.runtime.getManifest().version,
+    latest: u.latest, newer: !!u.newer, releases: releaseEntries(u, CHANGELOG.releases), build: CHANGELOG.build,
+    nativeAvailable: !!u.nativeAvailable, command: powershellCommand(base, { role: ROLE }),
+    helperCommand: powershellCommand(base, { role: ROLE, extensionId: chrome.runtime.id, helper: true }),
+  }, { copy: copyText, update: updateNow });
+  if (!opened) return;
+  const seen = { changelogSeen: localChangelogId };
+  if (u.newer) seen.changelogViewed = `${ROLE}:${u.latest}`;
+  chrome.storage.local.set(seen).catch(() => {});
 }
+$('btnChangelog').addEventListener('click', showChangelog);
 
 /** Atualiza pelo ajudante nativo e recarrega a extensão (voltando no mesmo ponto). */
 async function updateNow(btn) {
@@ -6461,40 +6682,49 @@ async function updateNow(btn) {
   } catch (e) {
     btn.disabled = false;
     btn.textContent = label;
-    toast(`Não deu para atualizar sozinho: ${e.message}. Use “Copiar comando de atualização”.`);
+    const message = `Não deu para atualizar sozinho: ${e.message}. Use “Copiar comando de atualização”.`;
+    toast(message);
+    if (btn.closest(".changelog-dialog")) throw new Error(message);
   }
 }
 
 async function checkForUpdate() {
+  if (checkingChangelog) return;
+  checkingChangelog = true;
   try {
-    const u = await send("CHECK_UPDATE", {});
-    if (!u?.newer) return;
-    const { updateDismissed } = await chrome.storage.local.get({ updateDismissed: "" });
-    if (updateDismissed === u.latest) return;
+    const [u, nat, seen] = await Promise.all([
+      send("CHECK_UPDATE", {}).catch(() => null),
+      send("NATIVE_PING").catch(() => ({ available: false })),
+      chrome.storage.local.get({ updateDismissed: "", changelogViewed: "", changelogSeen: "" }),
+    ]);
+    changelogUpdate = { ...u, nativeAvailable: nat.available };
+    const hasLocal = CHANGELOG.releases.length || CHANGELOG.build?.changes?.length || CHANGELOG.build?.files?.length;
+    const unseenUpdate = u?.newer && seen.changelogViewed !== `${ROLE}:${u.latest}`;
+    const unseenBuild = hasLocal && seen.changelogSeen !== localChangelogId;
+    if (params.has("changelog") || unseenUpdate || unseenBuild) showChangelog();
+    params.delete("changelog");
+    if (!u?.newer) { $("updateBox").classList.add("hidden"); return; }
+    if (seen.updateDismissed === u.latest) return;
     const box = $("updateBox");
-    box.querySelector("span").textContent = `Nova versão ${u.latest} disponível — você está na ${u.current}.${u.notes ? ` ${u.notes}` : ""}`;
+    box.querySelector("span").textContent = `Versão ${u.latest} disponível · instalada ${u.current}`;
     box.classList.remove("hidden");
-    // Repositório privado: quem baixa é o instalador (com o token); o botão abre o repositório no GitHub
     $("btnUpdateGet").textContent = "Ver o que mudou";
-    $("btnUpdateGet").onclick = (e) => {
-      const url = u.guide || u.repo;
-      return url ? openIssue(url, e) : toast("O update.json não tem o link.");
-    };
-    // Com o ajudante ativado: "Atualizar agora" (um clique). Sem ele: copiar o comando — que também ativa o botão.
-    const nat = await send("NATIVE_PING").catch(() => ({ available: false }));
-    const cmd = activationCommand(u.installCommand);
+    $("btnUpdateGet").onclick = showChangelog;
+    const cmd = powershellCommand(u.installCommand || INSTALL_CMD, { role: ROLE });
     $("btnUpdateHow").textContent = nat.available ? "Atualizar agora" : cmd ? "Copiar comando de atualização" : "Como atualizar";
     $("btnUpdateHow").classList.toggle("primary", !!nat.available);
     $("btnUpdateHow").onclick = async () => {
       if (nat.available) return updateNow($("btnUpdateHow"));
       if (!cmd) return toast("Rode o atualizar-quickfill.bat de novo. Depois clique em “Recarregar extensão” que aparece aqui no topo.", "info");
       const ok = await copyText(cmd);
-      toast(ok ? "Comando copiado! Tecle Win+R, cole (Ctrl+V) e Enter. Ao terminar, clique em “Recarregar extensão” aqui no topo — e das próximas vezes já aparece “Atualizar agora”."
+      toast(ok ? "Comando copiado! Cole no PowerShell e pressione Enter. Depois recarregue a extensão. O Ajudante não será instalado."
         : `Copie e rode: ${cmd}`, ok ? "ok" : "info");
     };
     $("updateClose").onclick = () => { box.classList.add("hidden"); chrome.storage.local.set({ updateDismissed: u.latest }).catch(() => {}); };
   } catch { /* sem aviso: segue normal */ }
+  finally { checkingChangelog = false; }
 }
+setInterval(() => { if (!document.hidden) checkForUpdate(); }, 15 * 60 * 1000);
 
 async function close() {
   await Promise.all([flushDraft(snapshot), saveView()]);
@@ -6551,19 +6781,16 @@ $("btnReset").addEventListener("click", () => { setFormValues(blankForm()); refr
 ["parentKey", "batchKeys", "statusColumns", "onlyMineBoard", "excludeSubBoard", ...FORM_IDS, ...CREATE_IDS]
   .forEach((id) => { $(id).addEventListener("input", touch); $(id).addEventListener("change", touch); });
 
-$("estimate").addEventListener("input", () => { updatePreview("estimate", "prevEstimate"); updateEstimateMatch(); });
-$("spent").addEventListener("input", () => { updatePreview("spent", "prevSpent"); updateEstimateMatch(); updateTimeHint(); refreshWorkday(); });
+$("estimate").addEventListener("input", () => {
+  state.estimateManual = !!$("estimate").value.trim();
+  if (state.timeMode === "range") updateTimeHint();
+  refreshPreviews();
+  touch();
+});
+$("spent").addEventListener("input", spentEdited);
 $("startDate").addEventListener("change", () => { updateTimeHint(); refreshWorkday(); updateStartHint(); });
-$("startTime").addEventListener("input", () => {
-  if (!$("startTime").value || $("startTime").value === state.echo.start) return;   // eco do cálculo
-  state.startAnchor = hmToMin($("startTime").value);
-  setTimeMode("start");
-});
-$("endTime").addEventListener("input", () => {
-  if (!$("endTime").value || $("endTime").value === state.echo.end) return;         // eco do ajuste à jornada
-  state.endAnchor = hmToMin($("endTime").value);
-  setTimeMode("end");
-});
+$("startTime").addEventListener("input", () => timeEdited("startTime"));
+$("endTime").addEventListener("input", () => timeEdited("endTime"));
 $("btnAutoTime").addEventListener("click", () => setTimeMode("auto"));
 $("btnNow").addEventListener("click", () => {
   const prevDay = $("startDate").value;
@@ -6571,19 +6798,21 @@ $("btnNow").addEventListener("click", () => {
   state.endAnchor = nowMin();
   $("endTime").value = fmtHM(nowEnd());
   if (prevDay !== todayISO()) toast("Dia ajustado para hoje.", "info");
-  setTimeMode("end");
+  setTimeMode(state.timeMode === "range" && $("startTime").value ? "range" : "end");
 });
 
 document.querySelectorAll(".chips").forEach((g) => g.addEventListener("click", (e) => {
   if (e.target.tagName !== "BUTTON") return;
   e.preventDefault();
   $(g.dataset.target).value = e.target.textContent;
+  if (g.dataset.target === "estimate") state.estimateManual = true;
   refreshPreviews();
-  if (g.dataset.target === "spent") { updateTimeHint(); refreshWorkday({ delay: 0 }); }
+  if (g.dataset.target === "spent") { spentEdited(); refreshWorkday({ delay: 0 }); }
   touch();
 }));
 
 document.addEventListener("keydown", (e) => {
+  if (document.querySelector(".changelog-dialog[open]")) return;
   if (e.key === "Escape") close();
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") apply();
 });
@@ -6693,7 +6922,6 @@ chrome.runtime.onMessage.addListener((msg) => {
   $("spaceBar").classList.toggle("hidden", !["panel", "qaq", "day", "team"].includes(state.mode));
   $("qaPeriodBar").classList.toggle("hidden", !["panel", "qaq", "day"].includes(state.mode));
 
-  renderRecent();
   initBoards();
   const restored = await restore(defaults);
   const view = await resumeView();

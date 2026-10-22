@@ -1,4 +1,5 @@
 import { ROLE, INSTALL_CMD } from "./lib/role.js";
+import { powershellCommand } from "./lib/changelog.js";
 import { PALETTE, ROLE_ACCENT, applyAccent, loadAccent } from "./lib/theme.js";
 
 const ROLE_NAME = { qa: "QuickFill QA", dev: "QuickFill DEV", scrum: "QuickFill SCRUM", design: "QuickFill DESIGN" }[ROLE] || "QuickFill";
@@ -71,7 +72,7 @@ const FIELDS = ["baseUrl", "email", "apiToken", "startDateFieldId", "logWorkComm
   "teamProjects", "teamGoalHours", "teamCapHours", "overflowMode",
   "scrumStaleDays", "scrumWipLimit", "designLabels", "designWeeklyGoal",
   "stageFeito", "stageDeploy", "stagePrd", "stageQa", "stageReopen", "designDoing", "designReview", "designDelivered",
-  "feitoThreshold", "deployIssueType", "deploySummary", "deployers", "figmaUrl", "figmaToken", "qaRejectCategories",
+  "feitoThreshold", "deployIssueType", "deploySummary", "deployers", "figmaUrl", "figmaToken",
   "stageValidated", "stageBlocked", "qaPeople", "designProjects", "smPeople", "ignorePeople", "designPeople", "accentColor", "openMode", "updateUrl", "updateToken",
   "uxProject", "uxHuProject", "uxWeeklyGoal", "uxHiddenFronts", "uxIssueType"];
 // Todas nascem ligadas: só ficam desligadas se tiverem sido salvas como false.
@@ -83,8 +84,7 @@ const DEFAULT_VALUES = { workStart: "11:00", workEnd: "17:00", dailyCapHours: "6
   feitoThreshold: "3", deployIssueType: "Tarefa", deploySummary: "Realizando Deploy", deployers: "[]",
   qaPeople: '[{"name":"Almir Vinicius"},{"name":"Jhonathan Pinheiro"}]',
   openMode: "panel", accentColor: "", updateUrl: "",
-  smPeople: '[{"name":"Marjorie Pinheiro"}]', designPeople: '[{"name":"Amanda Saraiva"}]', ignorePeople: '[{"name":"Teste Novetech"}]',
-  qaRejectCategories: "Bug funcional, Layout/UI, Regra de negócio, Ambiente/Dados, Critério de aceite incompleto, Performance" };
+  smPeople: '[{"name":"Marjorie Pinheiro"}]', designPeople: '[{"name":"Amanda Saraiva"}]', ignorePeople: '[{"name":"Teste Novetech"}]' };
 
 const toMin = (t) => {
   const m = String(t || "").trim().match(/^(\d{1,2})(?::|h)?(\d{2})?$/);
@@ -383,7 +383,7 @@ function nativeStatus() {
 }
 $("btnNative").addEventListener("click", async () => {
   if (!INSTALL_CMD) return msg("Este pacote não tem o endereço do repositório (release.config.json).", true);
-  const cmd = INSTALL_CMD.replace('-Command "', `-Command "$env:QF_EXT_ID='${chrome.runtime.id}'; `);
+  const cmd = powershellCommand(INSTALL_CMD, { role: ROLE, extensionId: chrome.runtime.id, helper: true });
   try { await navigator.clipboard.writeText(cmd); msg("Comando copiado! Tecle Win+R, cole (Ctrl+V) e Enter. Depois volte aqui e recarregue a página."); }
   catch { prompt("Copie o comando e cole no Win+R:", cmd); }
 });

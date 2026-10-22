@@ -39,7 +39,7 @@
       </div>
       <div class="native-box" id="atualizacao">
         <div><b>Atualização com um clique</b> <span id="nativeStatus" class="help" style="margin:0">verificando…</span></div>
-        <p class="help" style="margin:4px 0 8px">Ativa o botão <b>Atualizar agora</b> no aviso de versão nova: o QuickFill baixa, instala e se recarrega sozinho. Só precisa fazer uma vez nesta máquina.</p>
+        <p class="help" style="margin:4px 0 8px">Opcional: instala o Ajudante em <b>Documentos\QuickFill\.ajudante</b> para baixar, instalar e recarregar com um clique. Você pode atualizar pelo PowerShell sem ativá-lo.</p>
         <button id="btnNative" class="btn">Ativar atualização com um clique</button>
       </div>
       <label class="field"><span>Token de leitura do repositório <em>opcional — o instalador já preenche</em></span><input id="updateToken" class="inp mono" type="password" autocomplete="off" placeholder="github_pat_…" /></label>
@@ -254,13 +254,6 @@
       <p class="help">Nomes de coluna/status separados por vírgula (sem diferença de acento ou maiúscula; basta o começo da palavra). Fluxo: Em andamento → <b>Feito</b> → <b>Deploy</b> → <b>Validação</b> → <b>Validado</b> → Concluído; <b>Impedido/Aguardando</b> é uma etapa à parte (não conta como em andamento). “Validado” não é fila do QA.</p>
       <div class="row-btns"><button id="btnStatusMap" class="btn">Ver como cada status foi classificado</button></div>
       <div id="statusMap" class="status-map"></div>
-    </section>
-
-    <!-- QA: reprovação -->
-    <section class="card" data-roles="qa">
-      <h2>Evidência e retorno ao DEV</h2>
-      <label class="field"><span>Categorias de reprovação</span><input id="qaRejectCategories" class="inp" placeholder="Bug funcional, Layout/UI, Regra de negócio…" /></label>
-      <p class="help">Aparecem ao registrar uma reprovação na aba Tarefa. Cada uma vira a etiqueta <code>retorno-&lt;categoria&gt;</code> na demanda.</p>
     </section>
 
     <!-- Story points -->

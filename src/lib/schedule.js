@@ -124,6 +124,7 @@ export function buildPlan({ startDate, items, busyByDay = {}, workday = DEFAULT_
   const used = (d) => d.usedBefore + d.planned;
 
   const result = [];
+  if (!items.length) day(startDate);   // prévia da jornada antes de informar a duração
   let cursorDate = startDate;
   let daysAdvanced = 0;
   let unplaced = 0;

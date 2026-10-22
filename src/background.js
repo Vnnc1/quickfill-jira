@@ -79,7 +79,6 @@ const DEFAULTS = {
   smPeople: '[{"name":"Marjorie Pinheiro"}]',   // Scrum Master / liderança (coluna própria em Pessoas)
   ignorePeople: '[{"name":"Teste Novetech"}]',  // contas de teste/automação que não entram em Pessoas
   designProjects: "",                  // DESIGN: projeto(s) do espaço de Design (vazio = MEED/SUS)
-  qaRejectCategories: "Bug funcional, Layout/UI, Regra de negócio, Ambiente/Dados, Critério de aceite incompleto, Performance",
 };
 
 /**
@@ -805,7 +804,9 @@ async function createSubtask(payload) {
 
   const projectKey = parent.fields?.project?.key || projectOf(parentKey);
   const type = await getSubtaskIssueType(projectKey, cfg);
-  const me = assignToMe ? await getMyself(cfg) : null;
+  // Atribuir a outra pessoa (Lote › Criar subtarefa): vale mais que "atribuir a mim"
+  const me = payload.assignee?.accountId ? { accountId: payload.assignee.accountId, displayName: payload.assignee.name || "" }
+    : assignToMe ? await getMyself(cfg) : null;
 
   const baseFields = {
     project: { key: projectKey },
@@ -1244,6 +1245,7 @@ function resolveEstimate(payload, cfg, current = payload.currentEstimate) {
     current,
     spent: payload.timeSpent,
     fromSpent: cfg.estimateFromSpent !== false,
+    preserveExisting: payload.preserveExistingEstimate === true,
   });
 }
 
@@ -2702,8 +2704,7 @@ async function uxAction(p = {}) {
     const fields = {
       project: { key: ux }, issuetype: { id: type.id },
       summary: `HU: ${src.fields?.summary || hu}`.slice(0, 250),
-      description: adfDoc(adfPara("Protótipo da HU ", adfLink(hu, `${cfg.baseUrl}/browse/${hu}`), "."),
-        adfPara(adfText("Criado pelo QuickFill DESIGN (aba Demanda).", [{ type: "em" }]))),
+      description: adfDoc(adfPara("Protótipo da HU ", adfLink(hu, `${cfg.baseUrl}/browse/${hu}`), ".")),
       ...(src.fields?.priority?.id ? { priority: { id: src.fields.priority.id } } : {}),
     };
     let created;
@@ -2803,7 +2804,7 @@ async function execSave(p = {}) {
     try {
       await jira(`/rest/api/3/issue/${encodeURIComponent(key)}/worklog?adjustEstimate=auto`, { method: "POST", cfg,
         body: { timeSpent: formatJira(d.minutes), started: toJiraLocal(todayLocal(), start),
-          comment: adfDoc(adfPara(`${i.title || "Execução"} (QuickFill DESIGN)`)) } });
+          comment: adfDoc(adfPara(i.title || "Execução")) } });
       i.logged = true; i.loggedAt = Date.now(); logged += d.minutes;
     } catch (e) { steps.push(`horas de “${i.title}” não apontadas (${e.message})`); }
   }
@@ -2825,7 +2826,6 @@ async function execSave(p = {}) {
       await addComment(key, adfDoc(
         adfPara(adfBold("Execuções da demanda")),
         ...lines, ...notes,
-        adfPara(adfText(`Atualizado por ${me.displayName} pelo QuickFill DESIGN.`, [{ type: "em" }])),
       ), cfg);
       steps.push("comentário com o resumo das faixas");
     } catch (e) { steps.push(`comentário não enviado (${e.message})`); }
@@ -2934,11 +2934,9 @@ async function createMeetingIssue(p = {}) {
   const type = await issueTypeByName(project, "Tarefa", cfg);
   if (!type) throw new Error(`Não encontrei um tipo de issue para criar em ${project}.`);
   const me = await getMyself(cfg);
-  const description = adfDoc(
-    ...adfLines(p.desc),
-    adfPara(adfText(`Marcado no QuickFill: ${p.date} das ${fmtHM(p.start)} às ${fmtHM(p.end)}.`, [{ type: "em" }])),
-  );
-  const fields = { project: { key: project }, issuetype: { id: type.id }, summary, description };
+  const description = adfLines(p.desc);
+  const fields = { project: { key: project }, issuetype: { id: type.id }, summary,
+    ...(description.length ? { description: adfDoc(...description) } : {}) };
   const steps = [];
   let created;
   try {
@@ -3009,9 +3007,9 @@ async function createDeployCard(p = {}) {
       const it = items.find((x) => x.key === k);
       return [adfLink(k, `${cfg.baseUrl}/browse/${k}`), it?.summary ? ` — ${it.summary}` : ""];
     })) : null,
-    adfPara(adfText("Criado pelo QuickFill SCRUM.", [{ type: "em" }])),
   );
-  const fields = { project: { key: project }, issuetype: { id: type.id }, summary, description };
+  const fields = { project: { key: project }, issuetype: { id: type.id }, summary,
+    ...(description.content.length ? { description } : {}) };
   const steps = [];
   let created;
   try {
@@ -3077,38 +3075,6 @@ async function qaQueue(p = {}) {
   return data;
 }
 
-/**
- * Evidência de teste: comentário padronizado na demanda. Reprovado também ganha a etiqueta
- * "retorno-<categoria>", que o SCRUM e o DEV usam para mostrar a causa do retrabalho.
- */
-async function postEvidence(p = {}) {
-  const cfg = await getConfig();
-  const key = normalizeKey(p.key);
-  const approved = p.result === "approved";
-  if (!approved && !String(p.category || "").trim()) throw new Error("Escolha a categoria da reprovação.");
-  const head = approved ? "✅ QA — Aprovado" : `❌ QA — Reprovado · ${p.category}`;
-  const body = adfDoc(
-    adfPara(adfBold(head)),
-    p.env ? adfPara(adfBold("Ambiente: "), String(p.env)) : null,
-    !approved && p.reason ? adfPara(adfBold("Motivo: "), String(p.reason)) : null,
-    p.steps ? adfPara(adfBold(approved ? "Evidência:" : "Como reproduzir:")) : null,
-    ...adfLines(p.steps),
-    p.link ? adfPara(adfBold("Evidência anexa: "), adfLink(String(p.link), String(p.link))) : null,
-    adfPara(adfText("Registrado pelo QuickFill QA.", [{ type: "em" }])),
-  );
-  const steps = [];
-  await addComment(key, body, cfg);
-  steps.push({ step: "Comentário de evidência", ok: true });
-  if (!approved && p.label !== false) {
-    const label = `retorno-${slug(p.category).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
-    try {
-      await jira(`/rest/api/3/issue/${encodeURIComponent(key)}`, { method: "PUT", cfg, body: { update: { labels: [{ add: label }] } } });
-      steps.push({ step: `Etiqueta ${label}`, ok: true });
-    } catch (e) { steps.push({ step: "Etiqueta de retorno", ok: false, detail: e.message }); }
-  }
-  return { key, url: `${cfg.baseUrl}/browse/${key}`, steps };
-}
-
 /* ------------------------------------------------------------------ */
 /* DESIGN — checklist de handoff e Figma                                */
 /* ------------------------------------------------------------------ */
@@ -3142,7 +3108,6 @@ async function handoffSave(p = {}) {
       adfList(Object.entries(labels).map(([id, label]) => `${value.items[id] ? "✓" : "✗"} ${label}`)),
       ...adfLines(value.notes),
       p.figma ? adfPara(adfBold("Figma: "), adfLink(p.figma, p.figma)) : null,
-      adfPara(adfText(`Registrado por ${me.displayName} pelo QuickFill DESIGN.`, [{ type: "em" }])),
     ), cfg);
   }
   return value;
@@ -3537,7 +3502,6 @@ const HANDLERS = {
   PERSON_MEETINGS: (p) => myMeetings(p),
   MEETING_CATEGORY_OPTIONS: (p) => meetingCategoryOptions(p),
   QA_QUEUE: (p) => qaQueue(p),
-  POST_EVIDENCE: (p) => postEvidence(p),
   HANDOFF_GET: (p) => handoffGet(p),
   HANDOFF_SAVE: (p) => handoffSave(p),
   FIGMA_FRAMES: (p) => figmaFrames(p),
@@ -3579,7 +3543,6 @@ const HANDLERS = {
       designProjects: splitList(cfg.designProjects).map((x) => x.toUpperCase()),
       uxProject: uxProjectOf(cfg),
       qaPeople: parseDeployers(cfg.qaPeople, true),
-      qaRejectCategories: cfg.qaRejectCategories,
       assignSelf: cfg.assignSelf,
       defaultProject: cfg.defaultProject,
       aliases: [..._aliases.map].map(([k, v]) => `${k}=${v}`).join(", "),
@@ -3763,7 +3726,7 @@ async function notifyIfUpdate() {
 async function onUpdateNotification() {
   chrome.notifications.clear(NOTIF_ID);
   const nat = await nativePing();
-  if (!nat.available) { chrome.tabs.create({ url: chrome.runtime.getURL("options.html#atualizacao") }); return; }
+  if (!nat.available) { chrome.tabs.create({ url: chrome.runtime.getURL("modal.html?standalone=1&changelog=1") }); return; }
   notify("qf-updating", `QuickFill ${ROLE_LABEL}`, "Baixando e instalando a versão nova…");
   try {
     await nativeUpdate();
@@ -3817,7 +3780,8 @@ async function checkUpdate(p = {}) {
   const pkg = json.packages?.[ROLE] || {};
   // cada perfil tem a sua versão e as suas notas (o topo do update.json é só para versões antigas)
   const data = { configured: true, private: !!json.private, repo: json.repo || "", installCommand: json.installCommand || "", guide: json.guide || "", latest: pkg.version || json.version,
-    notes: pkg.version ? pkg.notes || "" : json.notes || "", download: pkg.download || json.download || "", folder: pkg.folder || "", date: pkg.date || json.date || "" };
+    notes: pkg.version ? pkg.notes || "" : json.notes || "", changelog: pkg.version ? pkg.changelog || [] : json.changelog || [],
+    download: pkg.download || json.download || "", folder: pkg.folder || "", date: pkg.date || json.date || "" };
   await chrome.storage.local.set({ updateCheck: { url, at: Date.now(), data } });
   return { ...data, current, newer: newer(data.latest, current) };
 }

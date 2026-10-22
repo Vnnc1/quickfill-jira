@@ -81,3 +81,66 @@ Aplicações simultâneas originadas em janelas diferentes também não reservam
 Para a verificação manual, carregar a pasta gerada correspondente em `chrome://extensions`, testar Meu dia/Progresso e Demandas, alternar período/projeto, conferir um lote com agenda ocupada e validar o retorno após indisponibilidade do Jira. Para distribuir depois da revisão, seguir o processo de release já documentado no README.
 
 Referências oficiais consultadas para transporte e busca: [rate limits do Jira](https://developer.atlassian.com/cloud/jira/platform/rate-limiting/), [orientações para clientes](https://developer.atlassian.com/cloud/jira/platform/build-an-app-that-respects-rate-limits/) e [busca JQL do Jira Cloud](https://confluence.atlassian.com/jirakb/run-jql-search-query-using-jira-cloud-rest-api-1289424308.html). O endpoint clássico é mantido apenas como compatibilidade com instâncias antigas; o fluxo principal usa `/search/jql`.
+
+## Investigação pelo grafo: assinaturas nas descrições e comentários
+
+Data: 22/10/2026. Escopo desta etapa: a assinatura “Marcado no QuickFill: …” mostrada na descrição de MEED-2426, os caminhos de publicação relacionados e a correção do fluxo usado pelo QA.
+
+### Método e atualidade da evidência
+
+Foi consultado o grafo existente em `graphify-out/graph.json`, com 1.136 nós, 3.440 arestas e 44 comunidades. O snapshot indica o commit `2900ce62ac430ecd1cbb0ef7f9db08bc2131833e`; o HEAD desta investigação era `4044b1b0fae0dc70d8d4c60989e54da4c798ba7f`, com alterações locais adicionais. Portanto, os vínculos serviram para navegação; os números de linha e os comportamentos foram conferidos no código atual. O grafo original não foi regenerado ou substituído.
+
+Consultas realizadas:
+
+```powershell
+graphify query createMeetingIssue --budget 1700
+graphify query postEvidence --budget 1100
+```
+
+Também foi feita uma consulta direta às arestas `calls` de `adfDoc`, identificando seis publicadores: `createMeetingIssue`, `postEvidence`, `uxAction`, `execSave`, `createDeployCard` e `handoffSave`. O recorte entre esses publicadores e os auxiliares de publicação contém 14 nós e 38 arestas extraídas. Como a primeira consulta CLI ultrapassa o orçamento para manter todas as arestas e a segunda trunca a vizinhança, a conclusão não depende só da saída resumida da CLI: os registros correspondentes do JSON e os seis fluxos no código foram lidos.
+
+### Causa confirmada
+
+O fluxo de atividades é `openMeetingModal` → mensagem `CREATE_MEETING_ISSUE` → `createMeetingIssue` → montagem da descrição ADF → `jira` → `POST /rest/api/3/issue`. A emissão da mensagem está em [meetings.js](../src/lib/meetings.js#L456) e o roteamento em [background.js](../src/background.js#L3497). Essa ligação entre interface e serviço foi confirmada no código, pois a chamada indireta pela mensagem não aparece como uma chamada direta no grafo.
+
+Antes da correção desta etapa, `createMeetingIssue` acrescentava um parágrafo em itálico com “Marcado no QuickFill”, data e horários. Isso ocorria mesmo com descrição vazia. A correção anterior tinha removido a assinatura de `postEvidence`, responsável por comentários de evidência, e não alcançava a criação de atividades. São dois publicadores independentes.
+
+`adfDoc`, `adfLines` e `jira` não adicionam a marca. A composição acontecia nos publicadores. Remover a palavra “QuickFill” de todo texto enviado seria uma correção incorreta: a própria descrição da imagem menciona o projeto QuickFill como conteúdo escrito pelo usuário.
+
+### Inventário dos publicadores
+
+| Publicador e evidência atual | Destino | Situação nesta etapa |
+|---|---|---|
+| [createMeetingIssue](../src/background.js#L2926) | Descrição de atividade/reunião criada pela linha do tempo; compartilhado entre perfis | Corrigido: envia só os parágrafos informados. Quando não há descrição, omite o campo. Datas e horários continuam nos campos/apontamentos. |
+| `postEvidence` (nó histórico do grafo) | Comentário de evidência QA | Funcionalidade retirada: formulário, configuração, restauração e handler de publicação removidos. |
+| [uxAction, operação clone](../src/background.js#L2667) | Descrição da HU criada no DESIGN | Assinatura removida; mantém a referência e o vínculo com a HU. |
+| [execSave](../src/background.js#L2769) | Comentário do worklog e comentário de resumo no DESIGN | Duas assinaturas removidas; mantém título do trabalho, horas, resumo e notas. |
+| [createDeployCard](../src/background.js#L2990) | Descrição do card de deploy no SCRUM | Assinatura removida; mantém descrição, lista de cards, vínculos, responsável e sprint. Omite descrição quando vazia. |
+| [handoffSave](../src/background.js#L3096) | Comentário de handoff no DESIGN | Assinatura removida; mantém checklist, notas e link do Figma. |
+
+Após a autorização para a retirada integral, os cinco pontos adicionais em DESIGN/SCRUM foram corrigidos e o formulário de evidência foi retirado. O snapshot original ainda contém os seis publicadores antigos; no código atual, `postEvidence` não existe mais. Os auxiliares ADF continuam neutros: não removem palavras ou trechos digitados pelo usuário.
+
+### Requisitos e critérios de aceitação da correção QA
+
+- **OBS-CONTENT-001:** Quando uma atividade da linha do tempo for criada no Jira, a descrição deve conter apenas os parágrafos informados, sem assinatura automática, data ou horários anexados ao texto.
+- **OBS-CONTENT-002:** Quando a descrição estiver vazia, a criação deve omitir esse campo, sem gerar um documento ADF vazio ou usar uma assinatura como substituto.
+- **OBS-CONTENT-003:** Quando o usuário mencionar “QuickFill” no título ou na descrição, o conteúdo deve ser preservado.
+- **OBS-CONTENT-004:** Quando uma atividade for criada, a atribuição e o apontamento de tempo devem continuar funcionando independentemente da remoção da assinatura.
+
+O teste `atividade da linha do tempo cria descrição sem assinatura e preserva texto do usuário`, em `tests/background.test.mjs`, passa pelo roteador real do service worker com Chrome e Jira simulados. Confere igualdade do documento ADF com os parágrafos esperados, ausência de descrição quando vazia, atribuição e worklog de 30 minutos. O título e a descrição do cenário contêm a palavra QuickFill, garantindo que ela não seja removida do conteúdo legítimo.
+
+Verificação da investigação inicial: 99 testes aprovados. Após a retirada integral, `npm test`: 103 testes aprovados. Foram adicionados testes dos publicadores DESIGN/SCRUM, incluindo fallback de prioridade na clonagem, descrição vazia no deploy, preservação de conteúdo, links, horas, checklist e metadados internos. O teste antigo de publicação de evidência foi substituído por um teste que comprova a rejeição da ação retirada, sem chamadas ao Jira. Não houve teste autenticado nem alteração de demanda real no Jira. A montagem do payload foi corrigida antes do transporte; autenticação, token, URL, política de repetição e tratamento de erros do cliente Jira não foram alterados. Erros de criação continuam propagados; a alternativa de atribuição reutiliza os mesmos campos, sem reconstruir ou reinserir a assinatura.
+
+### Retirada da funcionalidade de evidência/retorno ao DEV
+
+Foram removidos o bloco HTML da aba Tarefa, os listeners e funções associados, estilos exclusivos, a configuração `qaRejectCategories` nas Opções e nos defaults, e o handler `POST_EVIDENCE`. A criação automática de comentários de aprovação/reprovação e de etiquetas `retorno-*` por esse formulário deixa de existir.
+
+Snapshots novos guardam apenas filtros e data do QA. Propriedades antigas de evidência nos snapshots são ignoradas, permitindo reabrir uma sessão anterior sem acessar elementos removidos. Dados já gravados no Jira e a leitura de causas históricas pelos relatórios permanecem disponíveis; nenhuma demanda ou etiqueta existente é apagada.
+
+### Limites e encaminhamento
+
+A imagem mostra uma assinatura com data de 15/10/2026. Sozinha, ela não demonstra que a demanda tenha sido criada depois das correções de 22/10. A emissão da assinatura no código atual foi confirmada independentemente dessa data. Remover o gerador impede novas assinaturas, mas não reescreve descrições já gravadas, incluindo a de MEED-2426.
+
+A mudança em `src/` alcança os quatro perfis. Foram regeneradas e conferidas as quatro pastas locais QA, DEV, SCRUM e DESIGN; ZIPs de distribuição e extensão instalada não são atualizados por esse build. É necessário recarregar cada extensão que usa essas pastas para executar o código novo.
+
+Para próximas correções, partir dos consumidores reversos de `adfDoc` e `addComment`, seguir os handlers até o endpoint e testar cada publicador, como foi feito para os cinco pontos de DESIGN/SCRUM. Os auxiliares de ADF devem continuar neutros, sem filtros globais que apaguem texto do usuário. O grafo precisa ter seu snapshot confrontado com o HEAD e com o código local a cada investigação.

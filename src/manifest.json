@@ -58,6 +58,7 @@
         "modal.html",
         "modal.js",
         "modal.css",
+        "changelog.css",
         "lib/*.js"
       ],
       "matches": [

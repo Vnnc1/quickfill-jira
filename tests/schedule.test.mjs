@@ -2,6 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildPlan } from "../src/lib/schedule.js";
 
+test("prévia sem duração mostra a jornada e os apontamentos existentes nos dois modos", () => {
+  for (const overflow of ["sameDay", "nextDay"]) {
+    const plan = buildPlan({ startDate: "2026-10-22", items: [],
+      workday: { overflow }, busyByDay: { "2026-10-22": [{ key: "SUS-1", start: 660, minutes: 45 }] } });
+    assert.equal(plan.days.length, 1);
+    assert.equal(plan.days[0].usedBefore, 45);
+    assert.equal(plan.days[0].planned, 0);
+    assert.equal(plan.days[0].total, 45);
+    assert.equal(plan.days[0].existing[0].key, "SUS-1");
+    assert.deepEqual(plan.items, []);
+  }
+});
+
 test("lote respeita uma única janela de dias mesmo com vários itens grandes", () => {
   const plan = buildPlan({ startDate: "2026-10-19", maxDays: 2,
     workday: { overflow: "nextDay", start: 660, end: 720, capMinutes: 60 },

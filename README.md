@@ -4,10 +4,13 @@ Extensões do Chrome para o dia a dia da equipe no Jira:
 
 | QuickFill | Para quem | O que faz |
 |---|---|---|
-| **QA** | QA | Preenche datas, estimativa, horas e status das subtarefas (Testes Manuais), em uma tarefa ou em lote. Inclui fila de validação, evidência de teste e Meu dia |
+| **QA** | QA | Preenche datas, estimativa, horas e status das subtarefas (Testes Manuais), em uma tarefa ou em lote. Inclui fila de validação e Meu dia |
 | **DEV** | Desenvolvimento | Seu dia contra a meta, progresso por sprint e suas demandas (PR, deploy, validação, reabertas) |
 | **SCRUM** | Scrum Master | Saúde da sprint, burndown, quem está com o quê, riscos e o card "Realizando Deploy" |
 | **DESIGN** | Design UI/UX | HUs por etapa, quem está esperando design, Figma por HU, checklist de handoff e meta semanal |
+
+Os quatro perfis enviam descrições, comentários e apontamentos sem acrescentar assinaturas
+automáticas do QuickFill. O antigo formulário de evidência/retorno ao DEV foi retirado.
 
 ---
 
@@ -26,17 +29,26 @@ Extensões do Chrome para o dia a dia da equipe no Jira:
 3. **Carregue no Chrome:** abra `chrome://extensions`, ligue o **Modo do desenvolvedor** (canto superior direito),
    clique em **Carregar sem compactação** e escolha a pasta. O caminho já está copiado: é só colar com **Ctrl+V**.
 4. **Configure:** clique no ícone do QuickFill › ⚙ **Opções** e preencha a URL do Jira, o seu e-mail e o
-   [API token do Jira](https://id.atlassian.com/manage-profile/security/api-tokens). Depois clique em **Testar conexão** e, na mesma página, em **Ativar atualização com um clique**.
+   [API token do Jira](https://id.atlassian.com/manage-profile/security/api-tokens). Depois clique em **Testar conexão**.
+   A ativação do Ajudante para atualizar com um clique é opcional.
 
 ## Atualizar
 
-**Com um clique (recomendado):** ative uma vez em **Opções › Atualização com um clique**.
+Quando houver uma atualização, o **modal de novidades** abre uma vez com as alterações e o histórico
+do seu perfil. Você pode reabri-lo pelo botão **Novidades e histórico de versões**, no cabeçalho,
+ou por **Ver o que mudou** no aviso.
+
+**Pelo PowerShell:** no modal, clique em **Copiar comando de atualização**, abra o PowerShell, cole e
+tecle **Enter**. Depois clique em **Recarregar extensão** (ou recarregue em `chrome://extensions`).
+Esse comando atualiza apenas o seu perfil e não instala nem modifica o Ajudante.
+
+**Com um clique (opcional):** ative uma vez em **Opções › Atualização com um clique**, ou abra a opção
+**Ajudante opcional para atualizar com um clique** no modal de novidades.
 Clique no botão, tecle **Win + R**, cole (**Ctrl+V**) e tecle **Enter**. Pronto: quando sair versão nova,
 chega uma notificação do Windows e o aviso no topo do QuickFill mostra **Atualizar agora**: ele baixa, instala e se recarrega sozinho.
 
-**Sem ativar:** no aviso **"Nova versão disponível"**, clique em **Copiar comando de atualização**, tecle
-**Win + R**, cole e tecle **Enter**. Depois clique em **Recarregar extensão**. Esse comando também ativa o
-botão para as próximas vezes.
+Somente o comando de ativação instala o Ajudante em `Documentos\QuickFill\.ajudante` e registra o
+Native Messaging para seu usuário do Windows. Quem já tem o Ajudante pode continuar usando-o.
 
 As configurações, o token e as metas continuam.
 
@@ -61,9 +73,17 @@ update.json                  versão, data e notas publicadas de cada perfil
 ```
 npm test                                  # testes
 npm run build                             # gera as 4 pastas para testar no Chrome
+npm run build -- --notes "Correção no filtro; Melhorias na busca"  # notas do build local
 npm run status                            # versão de cada perfil e quais têm mudança não lançada
 npm run release -- dev -m "o que mudou"   # lança só o DEV (4.8.2 → 4.8.3)
 ```
+
+Cada build inclui `lib/changelog-data.js` com o histórico do perfil, um identificador do conteúdo e um
+relatório automático dos arquivos alterados desde o último commit do `CHANGELOG.md` daquele perfil
+(incluindo alterações locais e arquivos novos). As mensagens dos commits desse período entram como
+notas automáticas; `--notes` permite fornecer a descrição das mudanças no lugar delas.
+O modal abre uma vez por conteúdo novo do build, inclusive quando o número da versão continua igual.
+O build não publica nem aumenta versões: as notas oficiais continuam sendo registradas no release.
 
 Os contratos de cache, transporte e paginação, as correções investigadas com Graphify e os pontos para futuras refatorações estão em [Investigação técnica do QuickFill](specs/quickfill_reverse_spec.md).
 
@@ -76,7 +96,8 @@ Os contratos de cache, transporte e paginação, as correções investigadas com
    - `npm run release -- todos --minor -m "..."` → os 4, número do meio (4.8.x → 4.9.0); `--major` → 5.0.0;
    - `--dry` mostra o que faria sem gravar; separe itens da nota com `;` (viram linhas no CHANGELOG).
 3. O release roda os testes, sobe a versão em `profiles/<perfil>/profile.json`, escreve no
-   `CHANGELOG.md` do perfil, gera o `.zip` **só dos perfis lançados** e atualiza o `update.json` só para eles.
+   `CHANGELOG.md` do perfil, gera o `.zip` **só dos perfis lançados** e atualiza o `update.json` só para eles,
+   incluindo o histórico estruturado em `packages.<perfil>.changelog` para o modal de quem vai atualizar.
 4. Faça o `git commit` e o `git push` que ele mostra no fim.
 
 Os perfis que não foram lançados continuam com a mesma versão e o mesmo `.zip`: quem usa não recebe aviso.

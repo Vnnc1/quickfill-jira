@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { renderIcon, ICON_SIZES } from "./tools/icons.mjs";
+import { profileHistory, buildChanges } from "./tools/changelog.mjs";
 
 export const ROOT = dirname(fileURLToPath(import.meta.url));
 export const SRC = join(ROOT, "src");
@@ -78,7 +79,7 @@ function roleJs(p) {
 export const ROLE = "${p.role}";
 /** update.json do repositório da equipe (aviso de nova versão). Vazio = sem aviso. */
 export const UPDATE_URL = "${UPDATE_URL}";
-/** Comando de instalação/atualização (Win+R). Com QF_EXT_ID também ativa o botão "Atualizar agora". */
+/** Comando de instalação/atualização. O Ajudante exige ativação explícita. */
 export const INSTALL_CMD = ${JSON.stringify(INSTALL_CMD)};
 `;
 }
@@ -123,7 +124,7 @@ function generated(p) {
 }
 
 /** Gera a pasta de um perfil do zero (arquivos apagados em src/ somem do pacote também). */
-export function buildProfile(p) {
+export function buildProfile(p, { notes = "", released = false } = {}) {
   const out = join(ROOT, p.folder);
   rmSync(out, { recursive: true, force: true });
   const write = (rel, data) => { mkdirSync(dirname(join(out, rel)), { recursive: true }); writeFileSync(join(out, rel), data); };
@@ -134,6 +135,11 @@ export function buildProfile(p) {
   const own = join(PROFILES_DIR, p.role, "files");
   for (const f of listFiles(own)) { mkdirSync(dirname(join(out, f)), { recursive: true }); copyFileSync(join(own, f), join(out, f)); }
   for (const [rel, data] of Object.entries(generated(p))) write(rel, data);
+  const report = released ? { changes: [], files: [], sourceHash: "" } : buildChanges(ROOT, p.role, notes);
+  const changelog = { releases: profileHistory(ROOT, p.role), build: {
+    id: createHash("sha256").update(packageHash(p, out)).update(JSON.stringify(report)).digest("hex").slice(0, 16), version: p.version, ...report,
+  } };
+  write("lib/changelog-data.js", `/** Histórico e relatório deste pacote. Gerado pelo build. */\nexport const CHANGELOG = ${JSON.stringify(changelog, null, 2)};\n`);
   return out;
 }
 
@@ -144,7 +150,7 @@ export function buildProfile(p) {
 export function packageHash(p, dir = join(ROOT, p.folder)) {
   const h = createHash("sha256");
   for (const f of listFiles(dir)) {
-    if (f === "CHANGELOG.md") continue;
+    if (f === "CHANGELOG.md" || f === "lib/changelog-data.js") continue;
     let data = readFileSync(join(dir, f));
     if (/\.(js|css|html|json|md)$/.test(f)) data = Buffer.from(String(data).replace(/\r\n/g, "\n"));
     if (f === "manifest.json") data = Buffer.from(String(data).replace(/"version": "[^"]*",?\n/, ""));
@@ -215,9 +221,11 @@ export function writeInstaller() {
 
 if (process.argv[1]?.endsWith("build.mjs")) {
   const profiles = readProfiles();
+  const notesAt = process.argv.indexOf("--notes");
+  const notes = notesAt < 0 ? "" : process.argv[notesAt + 1] || "";
   for (const role of ORDER) {
     const p = profiles[role];
-    buildProfile(p);
+    buildProfile(p, { notes });
     console.log(`✓ ${p.folder.padEnd(22)} ${role.toUpperCase().padEnd(6)} ${p.version}`);
   }
   console.log("Pastas prontas para testar no Chrome. Para publicar: npm run status / npm run release");

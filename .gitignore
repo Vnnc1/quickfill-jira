@@ -1,5 +1,6 @@
 /*.zip
 node_modules/
+.taste-skill/
 .DS_Store
 Thumbs.db
 # token de leitura gravado pelo instalador (nunca no repositório)
