@@ -1,43 +1,232 @@
 {
-  "version": "4.9.3",
+  "version": "4.9.4",
   "private": false,
   "repo": "https://github.com/Vnnc1/quickfill-jira",
   "installCommand": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/quickfill.ps1 | iex\"",
   "guide": "https://github.com/Vnnc1/quickfill-jira#readme",
-  "date": "2026-10-21",
-  "notes": "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint); Sprint separada e busca nas Demandas; Concluído conta como entregue; Equipe a cada 30 s com pausa automática do Jira",
+  "date": "2026-10-27",
+  "notes": "Correções do cliente Jira e do fluxo da demanda no QA; Execuções no DESIGN; Modal de novidades e histórico de versões por perfil; Apontamento de tempo por intervalo; Ajudante de atualização ativado apenas por opção do usuário",
   "packages": {
     "qa": {
-      "version": "4.8.5",
+      "version": "4.8.6",
       "folder": "jira-quickfill-qa",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-qa.zip",
-      "date": "2026-10-21",
-      "notes": "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint); Sprint separada e busca nas Demandas; Concluído conta como entregue; Equipe a cada 30 s com pausa automática do Jira",
-      "hash": "a6f6a22ba29bc140"
+      "date": "2026-10-27",
+      "notes": "Correções do cliente Jira e do fluxo da demanda no QA; Execuções no DESIGN; Modal de novidades e histórico de versões por perfil; Apontamento de tempo por intervalo; Ajudante de atualização ativado apenas por opção do usuário",
+      "hash": "2e37ae1402729cfd",
+      "changelog": [
+        {
+          "version": "4.8.6",
+          "date": "2026-10-27",
+          "changes": [
+            "Correções do cliente Jira e do fluxo da demanda no QA",
+            "Execuções no DESIGN",
+            "Modal de novidades e histórico de versões por perfil",
+            "Apontamento de tempo por intervalo",
+            "Ajudante de atualização ativado apenas por opção do usuário"
+          ]
+        },
+        {
+          "version": "4.8.5",
+          "date": "2026-10-21",
+          "changes": [
+            "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint)",
+            "Sprint separada e busca nas Demandas",
+            "Concluído conta como entregue",
+            "Equipe a cada 30 s com pausa automática do Jira"
+          ]
+        },
+        {
+          "version": "4.8.4",
+          "date": "2026-10-21",
+          "changes": [
+            "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)"
+          ]
+        },
+        {
+          "version": "4.8.3",
+          "date": "2026-10-21",
+          "changes": [
+            "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão",
+            "DESIGN cria no espaço UX"
+          ]
+        },
+        {
+          "version": "4.8.2",
+          "date": "2026-10-20",
+          "changes": [
+            "Última versão com o número igual nos 4 perfis. Daqui em diante cada perfil sobe a sua."
+          ]
+        }
+      ]
     },
     "dev": {
-      "version": "4.8.5",
+      "version": "4.8.6",
       "folder": "jira-quickfill-dev",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-dev.zip",
-      "date": "2026-10-21",
-      "notes": "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint); Sprint separada e busca nas Demandas; Concluído conta como entregue; Equipe a cada 30 s com pausa automática do Jira",
-      "hash": "863f032b01951d34"
+      "date": "2026-10-27",
+      "notes": "Correções do cliente Jira e do fluxo da demanda no QA; Execuções no DESIGN; Modal de novidades e histórico de versões por perfil; Apontamento de tempo por intervalo; Ajudante de atualização ativado apenas por opção do usuário",
+      "hash": "69008058e4d10018",
+      "changelog": [
+        {
+          "version": "4.8.6",
+          "date": "2026-10-27",
+          "changes": [
+            "Correções do cliente Jira e do fluxo da demanda no QA",
+            "Execuções no DESIGN",
+            "Modal de novidades e histórico de versões por perfil",
+            "Apontamento de tempo por intervalo",
+            "Ajudante de atualização ativado apenas por opção do usuário"
+          ]
+        },
+        {
+          "version": "4.8.5",
+          "date": "2026-10-21",
+          "changes": [
+            "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint)",
+            "Sprint separada e busca nas Demandas",
+            "Concluído conta como entregue",
+            "Equipe a cada 30 s com pausa automática do Jira"
+          ]
+        },
+        {
+          "version": "4.8.4",
+          "date": "2026-10-21",
+          "changes": [
+            "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)"
+          ]
+        },
+        {
+          "version": "4.8.3",
+          "date": "2026-10-21",
+          "changes": [
+            "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão",
+            "DESIGN cria no espaço UX"
+          ]
+        },
+        {
+          "version": "4.8.2",
+          "date": "2026-10-20",
+          "changes": [
+            "Última versão com o número igual nos 4 perfis. Daqui em diante cada perfil sobe a sua."
+          ]
+        }
+      ]
     },
     "scrum": {
-      "version": "4.8.5",
+      "version": "4.8.6",
       "folder": "jira-quickfill-scrum",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-scrum.zip",
-      "date": "2026-10-21",
-      "notes": "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint); Sprint separada e busca nas Demandas; Concluído conta como entregue; Equipe a cada 30 s com pausa automática do Jira",
-      "hash": "5c16b07dd6877a47"
+      "date": "2026-10-27",
+      "notes": "Correções do cliente Jira e do fluxo da demanda no QA; Execuções no DESIGN; Modal de novidades e histórico de versões por perfil; Apontamento de tempo por intervalo; Ajudante de atualização ativado apenas por opção do usuário",
+      "hash": "1ce1ebec75427c27",
+      "changelog": [
+        {
+          "version": "4.8.6",
+          "date": "2026-10-27",
+          "changes": [
+            "Correções do cliente Jira e do fluxo da demanda no QA",
+            "Execuções no DESIGN",
+            "Modal de novidades e histórico de versões por perfil",
+            "Apontamento de tempo por intervalo",
+            "Ajudante de atualização ativado apenas por opção do usuário"
+          ]
+        },
+        {
+          "version": "4.8.5",
+          "date": "2026-10-21",
+          "changes": [
+            "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint)",
+            "Sprint separada e busca nas Demandas",
+            "Concluído conta como entregue",
+            "Equipe a cada 30 s com pausa automática do Jira"
+          ]
+        },
+        {
+          "version": "4.8.4",
+          "date": "2026-10-21",
+          "changes": [
+            "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)"
+          ]
+        },
+        {
+          "version": "4.8.3",
+          "date": "2026-10-21",
+          "changes": [
+            "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão",
+            "DESIGN cria no espaço UX"
+          ]
+        },
+        {
+          "version": "4.8.2",
+          "date": "2026-10-20",
+          "changes": [
+            "Última versão com o número igual nos 4 perfis. Daqui em diante cada perfil sobe a sua."
+          ]
+        }
+      ]
     },
     "design": {
-      "version": "4.9.3",
+      "version": "4.9.4",
       "folder": "jira-quickfill-design",
       "download": "https://raw.githubusercontent.com/Vnnc1/quickfill-jira/master/dist/jira-quickfill-design.zip",
-      "date": "2026-10-21",
-      "notes": "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint); Sprint separada e busca nas Demandas; Concluído conta como entregue; Equipe a cada 30 s com pausa automática do Jira",
-      "hash": "c5489be37b0eccd5"
+      "date": "2026-10-27",
+      "notes": "Correções do cliente Jira e do fluxo da demanda no QA; Execuções no DESIGN; Modal de novidades e histórico de versões por perfil; Apontamento de tempo por intervalo; Ajudante de atualização ativado apenas por opção do usuário",
+      "hash": "6e5d878df4fdb0a5",
+      "changelog": [
+        {
+          "version": "4.9.4",
+          "date": "2026-10-27",
+          "changes": [
+            "Correções do cliente Jira e do fluxo da demanda no QA",
+            "Execuções no DESIGN",
+            "Modal de novidades e histórico de versões por perfil",
+            "Apontamento de tempo por intervalo",
+            "Ajudante de atualização ativado apenas por opção do usuário"
+          ]
+        },
+        {
+          "version": "4.9.3",
+          "date": "2026-10-21",
+          "changes": [
+            "Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint)",
+            "Sprint separada e busca nas Demandas",
+            "Concluído conta como entregue",
+            "Equipe a cada 30 s com pausa automática do Jira"
+          ]
+        },
+        {
+          "version": "4.9.2",
+          "date": "2026-10-21",
+          "changes": [
+            "Aviso de versão nova em minutos: a extensão verifica a cada 15 min (antes, até 6 h)"
+          ]
+        },
+        {
+          "version": "4.9.1",
+          "date": "2026-10-21",
+          "changes": [
+            "Atividades do dia: projeto e dia no modal, modelos na lateral, Reuniões/Execução em botão",
+            "DESIGN cria no espaço UX"
+          ]
+        },
+        {
+          "version": "4.9.0",
+          "date": "2026-10-21",
+          "changes": [
+            "Espaço UX: abas Quadro, Entregas e Demanda, com busca",
+            "Olho do Figma nas demandas: modal com Visualizar (telas) e Protótipo navegável",
+            "O link vem do painel Designs, descrição, comentários e demandas ligadas"
+          ]
+        },
+        {
+          "version": "4.8.2",
+          "date": "2026-10-20",
+          "changes": [
+            "Última versão com o número igual nos 4 perfis. Daqui em diante cada perfil sobe a sua."
+          ]
+        }
+      ]
     }
   }
 }

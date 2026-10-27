@@ -2,6 +2,14 @@
 
 Cada perfil tem a sua versão. Esta lista é preenchida pelo `npm run release`.
 
+## 4.9.4 (2026-10-27)
+
+- Correções do cliente Jira e do fluxo da demanda no QA
+- Execuções no DESIGN
+- Modal de novidades e histórico de versões por perfil
+- Apontamento de tempo por intervalo
+- Ajudante de atualização ativado apenas por opção do usuário
+
 ## 4.9.3 (2026-10-21)
 
 - Filtros de período de verdade (Hoje, Ontem, dia, 7/14/30, Sprint)
