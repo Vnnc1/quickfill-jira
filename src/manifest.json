@@ -44,7 +44,8 @@
         "https://*.atlassian.net/*"
       ],
       "js": [
-        "content.js"
+        "content.js",
+        "board-mode.js"
       ],
       "css": [
         "content.css"
@@ -59,6 +60,8 @@
         "modal.js",
         "modal.css",
         "changelog.css",
+        "board-mode.css",
+        "board-detail.css",
         "lib/*.js"
       ],
       "matches": [
