@@ -1824,3 +1824,5 @@ html.float .top-actions .ic { width: 28px; height: 28px; }
   .am-main { flex-direction: column; }
   .am-side { width: auto; max-height: 34vh; border-right: 0; border-bottom: 1px solid var(--line); }
 }
+
+.dashfill-day #btnLayout, .dashfill-day #btnPop { display: none; }

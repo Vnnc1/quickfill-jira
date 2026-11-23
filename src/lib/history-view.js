@@ -59,6 +59,11 @@ export async function openHistory(key, { send, openIssue, base = "" } = {}) {
     return;
   }
   if (current?.root !== root) return;   // fechou enquanto carregava
+  renderHistory(dlg, data, { key, base, openIssue, onClose: closeHistory });
+}
+
+/** O gráfico também pode viver dentro da gaveta DEV, sem sobreposição modal. */
+export function renderHistory(dlg, data, { key, base, openIssue, onClose }) {
   const H = buildHistory(data, Date.now());
   const url = data.url || (base && key ? `${base}/browse/${key}` : "");
   const st = { ...pref(), only: false, sel: H.nodes.length - 1 };
@@ -95,7 +100,7 @@ export async function openHistory(key, { send, openIssue, base = "" } = {}) {
       </div>
       <div class="hist-body${animate ? " hist-anim" : ""}">${st.layout === "h" ? horizontal(H, st, dim) : vertical(H, st, dim)}</div>`;
 
-    dlg.querySelector("[data-close]").addEventListener("click", closeHistory);
+    dlg.querySelector("[data-close]").addEventListener("click", onClose);
     dlg.querySelector("[data-jira]").addEventListener("click", (e) => openIssue?.(url, e));
     dlg.querySelectorAll("[data-layout]").forEach((b) => b.addEventListener("click", () => {
       st.layout = b.dataset.layout; savePref({ layout: st.layout }); animate = true; render();

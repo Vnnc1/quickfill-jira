@@ -26,6 +26,8 @@ import { STAGES, RISKS, DESIGN_STAGES, HANDOFF_ITEMS, TYPE_LABEL, stageOf, typeG
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const inIframe = window.parent !== window;
+const inDashFill = inIframe && ROLE === "dev" && params.get("dashfill") === "day";
+if (inDashFill) document.documentElement.classList.add("dashfill-day");
 if (inIframe) document.documentElement.classList.add("embedded");
 /* Perfis: "qa" é o completo (Tarefa/Lote); "dev", "scrum" e "design" são painéis só de leitura. */
 const IS_DASH = ROLE !== "qa";
@@ -3441,7 +3443,7 @@ function applyScale(z, { save = true } = {}) {
   $("zoomOut").disabled = uiScale <= ZOOM_STEPS[0];
   $("zoomIn").disabled = uiScale >= ZOOM_STEPS[ZOOM_STEPS.length - 1];
   // No overlay do Jira, a moldura acompanha o tamanho.
-  if (inIframe) window.parent.postMessage({ type: "QUICKFILL_SCALE", scale: uiScale }, "*");
+  if (inIframe && !inDashFill) window.parent.postMessage({ type: "QUICKFILL_SCALE", scale: uiScale }, "*");
   if (save) { try { chrome.storage.local.set({ uiScale }); } catch { /* conveniência */ } }
 }
 const stepScale = (dir) => {
@@ -6502,7 +6504,7 @@ $("qqWho").addEventListener("click", (e) => {
  * Sair clicando fora, com Esc, abrindo uma demanda ou trocando de aba guarda a tela (aba, rolagem,
  * filtros, cartões abertos e campos digitados) na sessão do Chrome; ao reabrir, tudo volta do jeito
  * que estava, com os dados já carregados. O X fecha "de verdade": limpa isso e recarrega do Jira. */
-const VIEW_KEY = `qfView:${ROLE}`;
+const VIEW_KEY = inDashFill ? "dashfillView:dev" : `qfView:${ROLE}`;
 const FRESH_KEY = `qfFresh:${ROLE}`;
 const RESUME = { active: false, fresh: new Set(), maxAge: 10 * 60 * 1000, quitting: false };
 const takeFresh = (k) => RESUME.fresh.delete(k);
@@ -6728,12 +6730,13 @@ setInterval(() => { if (!document.hidden) checkForUpdate(); }, 15 * 60 * 1000);
 
 async function close() {
   await Promise.all([flushDraft(snapshot), saveView()]);
-  if (inIframe) window.parent.postMessage({ type: "QUICKFILL_CLOSE" }, "*");
+  if (inIframe) window.parent.postMessage({ type: inDashFill ? "DASHFILL_COLLAPSE" : "QUICKFILL_CLOSE" }, "*");
   else window.close();
 }
 
 /** X: fecha de verdade — sem rascunho nem tela salva; na próxima vez tudo vem do Jira. */
 async function quit() {
+  if (inDashFill) return close();
   RESUME.quitting = true;
   clearTimeout(viewTimer);
   try {
@@ -6879,7 +6882,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   } catch { /* sem configuração ainda */ }
 
   if (ROLE !== "scrum") refreshDayPill();
-  checkForUpdate();
+  if (!inDashFill) checkForUpdate();
 
   document.querySelector(".brand h1").textContent = ROLE_NAME;
   document.title = `Jira ${ROLE_NAME}`;
@@ -6900,7 +6903,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     $("ctxLine").textContent = { dev: "Seu dia, seu progresso e sua equipe", scrum: "Sprint, pessoas, riscos e equipe", design: "Espaço UX: seu dia, quadro, entregas e demanda" }[ROLE] || "";
     if (HAS_PROG) await warmProg();
     const want = params.get("tab");
-    const view = await resumeView();
+    const view = inDashFill ? null : await resumeView();
     if (view) applyViewState(view);
     setMode(view && TABS.includes(view.mode) ? view.mode : TABS.includes(want) ? want : TABS[0], { restoring: true });
     if (view) applyViewAfter(view);
