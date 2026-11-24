@@ -1,15 +1,17 @@
 /* DashFill DEV: o quadro continua sendo do Jira (navegação, cliques e arraste).
  * Por cima dele: a lateral "Meu dia", a barra de baixo com o contexto da demanda e os modos de trabalho
- * do DEV (Foco, PRs, Retornos do QA, Daily e Deploy). */
+ * do DEV (Foco, PRs, Retornos do QA e Deploy). */
 (async () => {
   if (document.getElementById('quickfill-dev-dashfill')) return;
   const url = (file) => chrome.runtime.getURL(file);
   const [
     { extractLinks, formatMinutes, formatHM, timelineMetrics, issueKey },
+    { developmentDetails, branchCommands, isDevelopmentField },
     { renderHistory },
     { loadAccent },
   ] = await Promise.all([
     import(url('lib/board-rules.js')),
+    import(url('lib/dashfill-development.js')),
     import(url('lib/history-view.js')),
     import(url('lib/theme.js')),
   ]);
@@ -23,7 +25,6 @@
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `<link rel="stylesheet" href="${url('dashfill.css')}">
     <button class="launch" aria-pressed="false" hidden><span class="mark">QF</span><span>DashFill</span><span class="sw" aria-hidden="true"><i></i></span></button>
-    <button class="side-tab" hidden><span class="st-ic" aria-hidden="true">›</span><span class="st-t"></span></button>
     <div class="colbtns"></div>
     <aside class="day" aria-label="Meu dia no QuickFill DEV" hidden></aside>
     <section class="dock" aria-label="DashFill" hidden>
@@ -32,12 +33,13 @@
         <span class="mark">QF</span>
         <div class="who"></div>
         <nav class="modes" aria-label="Modos do DashFill"></nav>
+        <button class="btn compact-day" data-action="day">Meu dia</button>
         <div class="sizes" role="group" aria-label="Altura da barra"></div>
         <button class="ic" data-action="refresh" title="Atualizar" aria-label="Atualizar">↻</button>
-        <button class="ic" data-action="fold" aria-expanded="false" aria-label="Abrir ou fechar a barra">⌃</button>
+        <button class="btn fold" data-action="fold" aria-expanded="false" aria-controls="df-panel"><span aria-hidden="true"></span><b>Abrir painel</b></button>
       </header>
       <nav class="tabs" aria-label="Contexto da demanda" hidden></nav>
-      <div class="body" hidden></div>
+      <div class="body" id="df-panel" hidden></div>
     </section>`;
   document.documentElement.append(host);
   loadAccent('dev', host);
@@ -45,15 +47,20 @@
   // Marcas sobre os cards do Jira (fora do shadow): lista de deploy, card escolhido e o que sai de foco.
   const pageCss = document.createElement('style');
   pageCss.dataset.qfOwned = 'true';
-  pageCss.textContent = `[data-qf-deploy]{outline:2px solid #4bce97!important;outline-offset:-2px;border-radius:6px;position:relative}
-    [data-qf-deploy]::after{content:"Deploy";position:absolute;right:30px;top:6px;z-index:2;font:700 10.5px/1.6 -apple-system,'Segoe UI',sans-serif;padding:0 6px;border-radius:999px;background:#4bce97;color:#0f1a14;pointer-events:none}
+  pageCss.textContent = `[data-qf-deploy]{outline:2px solid #4bce97!important;outline-offset:-2px;border-radius:6px}
     [data-qf-sel]{outline:2px solid rgba(87,157,255,.9)!important;outline-offset:-2px;border-radius:6px}
     [data-qf-dim]{opacity:.32;transition:opacity .2s}
-    [data-qf-dim]:hover{opacity:.8}`;
+    [data-qf-dim]:hover{opacity:.8}
+    .qf-card-actions{position:relative;z-index:1;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;margin:4px 0 0 auto;width:fit-content;max-width:100%}
+    .qf-card-action{box-sizing:border-box;max-width:100%;border:1px solid #467060;border-radius:5px;padding:3px 8px;background:#20382e;color:#b6f1d5;font:600 11px/1.5 -apple-system,'Segoe UI',sans-serif;cursor:pointer;transition:background .15s,color .15s}
+    .qf-card-action[hidden]{display:none!important}
+    .qf-card-action:hover,.qf-card-action:focus-visible{background:#4bce97;color:#102018}
+    .qf-card-action:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+    @media(prefers-reduced-motion:reduce){.qf-card-action{transition:none}}`;
   document.head.append(pageCss);
 
   const $ = (s) => root.querySelector(s);
-  const launch = $('.launch'), day = $('.day'), dock = $('.dock'), sideTab = $('.side-tab'), colBox = $('.colbtns');
+  const launch = $('.launch'), day = $('.day'), dock = $('.dock'), colBox = $('.colbtns');
   const body = $('.body'), tabsEl = $('.tabs'), whoEl = $('.who'), modesEl = $('.modes'), sizesEl = $('.sizes');
 
   /* ================================================================ */
@@ -62,7 +69,7 @@
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const note = (m, cls = '') => `<p class="note ${cls}" role="status">${esc(m)}</p>`;
   const validKey = (k) => /^[A-Z][A-Z0-9_]*-\d+$/.test(k || '');
-  const safeUrl = (v) => { try { const u = new URL(v, location.origin); return /^https?:$/.test(u.protocol) ? u.href : ''; } catch { return ''; } };
+  const safeUrl = (v) => { if (!v) return ''; try { const u = new URL(v, location.origin); return /^https?:$/.test(u.protocol) ? u.href : ''; } catch { return ''; } };
   const W = (ms) => new Promise((r) => setTimeout(r, ms));
   const ago = (iso) => {
     const d = (Date.now() - Date.parse(iso)) / 60000;
@@ -211,15 +218,15 @@
     ['focus', 'Foco', 'Só o que é seu, com cronômetro para apontar'],
     ['prs', 'PRs', 'Pull requests do quadro: revisão, aprovação e merge'],
     ['returns', 'Retornos', 'O que voltou do QA ou do deploy nos últimos 14 dias'],
-    ['daily', 'Daily', 'Ontem, hoje e impedimentos, prontos para a daily'],
     ['deploy', 'Deploy', 'Lista de demandas para subir juntas'],
   ];
-  const TABS = [['resumo', 'Resumo'], ['git', 'Branch e PR'], ['docs', 'Docs e Figma'], ['comments', 'Comentários'], ['history', 'Histórico']];
+  const TABS = [['resumo', 'Resumo'], ['git', 'Branches e SQL'], ['envs', 'ENVs'], ['docs', 'Docs e Figma'], ['comments', 'Comentários'], ['history', 'Histórico']];
   const SIZES = { s: 230, m: 360, l: Math.round(innerHeight * 0.58) };
   let active = false, expandedDay = false, folded = true, view = 'issue', tab = 'resumo', size = 'm';
-  let key = '', current = null, colView = null, card = null, route = '', refreshedAt = 0, confirmBox = null;
+  let key = '', current = null, colView = null, route = '', refreshedAt = 0, confirmBox = null;
   let seq = 0, daySeq = 0, sessionOn = false, deployList = [], focus = null, myKeys = null;
   const reserved = new Map();
+  let dialogOpen = false;
   try {
     const saved = sessionStorage.getItem(PREF);
     sessionOn = saved === null ? sessionStorage.getItem('quickfill-board-active') === 'true' : saved === '1';
@@ -237,16 +244,9 @@
   /* Dados de uma demanda: campos, links, branch e PR (dev-status)     */
   /* ================================================================ */
   let fieldIdsP = null;
-  const branchFieldIds = () => (fieldIdsP ||= api('field').then((fs) => fs.filter((f) => /\bbranch(?:es)?\b/i.test(f.name) && /^customfield_\d+$/.test(f.id)).map((f) => f.id)).catch((e) => { fieldIdsP = null; throw e; }));
-  function branchValues(v) {
-    if (!v) return [];
-    if (Array.isArray(v)) return v.flatMap(branchValues);
-    if (typeof v === 'string') return v.split(/[\s,;]+/).filter(Boolean).map((name) => ({ name: name.replace(/^[A-Z ]+:\s*/, ''), url: safeUrl(name) && /^https?:/.test(name) ? name : '' }));
-    if (v.type === 'text') { const href = safeUrl(v.marks?.find((m) => m.type === 'link')?.attrs?.href); return href ? [{ name: v.text, url: href }] : branchValues(v.text); }
-    if (v.content) return branchValues(v.content);
-    const href = v.url || v.attrs?.url;
-    return href ? [{ name: v.name || v.value || href, url: safeUrl(href) }] : branchValues(v.value || v.name);
-  }
+  const developmentFields = () => (fieldIdsP ||= api('field')
+    .then(fields => fields.filter(isDevelopmentField))
+    .catch(error => { fieldIdsP = null; throw error; }));
   async function devStatus(issueId) {
     const out = { branches: [], prs: [], builds: 0, error: '' };
     try {
@@ -264,14 +264,13 @@
   async function issueData(k, force = false) {
     const hit = cache.get(k);
     if (!force && hit && Date.now() - hit.at < 120000) return hit.data;
-    const ids = await branchFieldIds().catch(() => []);
-    const fields = ['summary', 'status', 'assignee', 'reporter', 'priority', 'duedate', 'timetracking', 'issuetype', 'parent', 'description', 'updated', 'created', 'labels', 'issuelinks', 'comment', ...ids];
+    const definitions = await developmentFields().catch(() => null);
+    const fields = ['summary', 'status', 'assignee', 'reporter', 'priority', 'duedate', 'timetracking', 'issuetype', 'parent', 'description', 'updated', 'created', 'labels', 'issuelinks', 'comment', ...(definitions || []).map(field => field.id)];
     const [issue, remote] = await Promise.all([api(`issue/${k}?fields=${fields.join(',')}`), api(`issue/${k}/remotelink`).catch(() => [])]);
     const dev = await devStatus(issue.id);
     const f = issue.fields || {};
-    const names = new Set(dev.branches.map((b) => b.name));
-    const fb = ids.flatMap((id) => branchValues(f[id])).filter((b) => !names.has(b.name)).map((b) => ({ ...b, repo: '', fromField: true }));
-    const data = { key: k, id: issue.id, f, dev, branches: [...dev.branches, ...fb], links: extractLinks(issue, remote || []), summary: f.summary || '', status: f.status?.name || '', cat: f.status?.statusCategory?.key || '', comments: f.comment?.total ?? (f.comment?.comments || []).length };
+    const development = developmentDetails(dev.branches, f, definitions || []);
+    const data = { key: k, id: issue.id, f, dev, ...development, fieldsUnavailable: !definitions, links: extractLinks(issue, remote || []), summary: f.summary || '', status: f.status?.name || '', cat: f.status?.statusCategory?.key || '', comments: f.comment?.total ?? (f.comment?.comments || []).length };
     cache.set(k, { at: Date.now(), data });
     return data;
   }
@@ -292,19 +291,27 @@
   /* Quadro do Jira: cards, colunas, rota e espaço para a barra        */
   /* ================================================================ */
   const CARD_SEL = '[data-testid*="board-kit.ui.card"],[data-testid*="card.container"],[data-rbd-draggable-id],[data-issue-key]';
+  const ITEM_SEL = 'li,[role="listitem"],article';
+  const ISSUE_LINK = 'a[href*="/browse/"],a[href*="selectedIssue="],a[href*="selectedIssueKey="]';
   const COL_SEL = '[data-testid*="board-kit.ui.column"],[data-rbd-droppable-id^="column"],[data-testid*="board-column"]';
   const boardRoute = () => /\/boards?\/\d+(?:\/|$)|\/projects\/[^/]+\/board\/?$|\/secure\/RapidBoard\.jspa$/i.test(location.pathname) || !!document.querySelector(COL_SEL);
   function cardAt(el) {
-    const node = el?.closest?.(`${CARD_SEL},article,a[href*="/browse/"]`);
-    if (!node || node.closest('[role="dialog"]') || host.contains(node)) return null;
+    const node = el?.closest?.(ITEM_SEL) || el?.closest?.('[data-rbd-draggable-id],[data-issue-key]') || el?.closest?.(CARD_SEL);
+    if (!node || node.closest('dialog,[role="dialog"],[aria-modal="true"],nav,[role="navigation"]') || host.contains(node)) return null;
     const direct = node.getAttribute('data-issue-key') || node.getAttribute('data-rbd-draggable-id');
-    const link = node.matches('a[href]') ? node : node.querySelector('a[href*="/browse/"],a[href*="selectedIssue="]');
-    const k = validKey(direct) ? direct : link ? issueKey(link.href) : node.textContent.match(/\b[A-Z][A-Z0-9_]*-\d+\b/)?.[0];
+    const link = node.matches(ISSUE_LINK) ? node : node.querySelector(ISSUE_LINK);
+    const fromText = () => node.matches(CARD_SEL) && node.textContent.match(/\b[A-Z][A-Z0-9_]*-\d+\b/)?.[0];
+    const k = validKey(direct) ? direct : (link && issueKey(link.href)) || fromText();
     return validKey(k) ? { node, key: k } : null;
   }
   function cardNodes(scope = document) {
     const map = new Map();
-    for (const n of scope.querySelectorAll(CARD_SEL)) { const c = cardAt(n); if (c && !map.has(c.key)) map.set(c.key, c.node); }
+    const board = scope === document ? document.querySelector('#jira-page-layout-main,main,[role="main"]') || scope : scope;
+    for (const n of board.querySelectorAll(`${CARD_SEL},${ISSUE_LINK}`)) {
+      if (n.matches(ISSUE_LINK) && !n.closest(ITEM_SEL) && !n.closest(CARD_SEL)) continue;
+      const c = cardAt(n);
+      if (c && !map.has(c.key)) map.set(c.key, c.node);
+    }
     return map;
   }
   function columns() {
@@ -320,61 +327,63 @@
   const boardProjects = () => [...new Set([...cardNodes().keys()].map((k) => k.split('-')[0]))];
   const isPrCol = (name) => /^(pr|pull request|feito|done|code review|revis)/i.test(name);
 
+  const cardButtons = new Map();
   function paintCards() {
-    const nodes = cardNodes();
-    for (const el of document.querySelectorAll('[data-qf-deploy],[data-qf-sel],[data-qf-dim]')) { el.removeAttribute('data-qf-deploy'); el.removeAttribute('data-qf-sel'); el.removeAttribute('data-qf-dim'); }
-    if (!active) return;
-    for (const k of deployList) nodes.get(k)?.setAttribute('data-qf-deploy', '1');
-    if (key && view === 'issue') nodes.get(key)?.setAttribute('data-qf-sel', '1');
-    if (view === 'focus' && myKeys) for (const [k, n] of nodes) if (!myKeys.has(k)) n.setAttribute('data-qf-dim', '1');
+    const cards = active ? cardNodes() : new Map();
+    for (const [node, actions] of cardButtons) {
+      if (cards.get(actions.dataset.key) === node && actions.parentNode === node) continue;
+      actions.remove();
+      node.removeAttribute('data-qf-sel');
+      node.removeAttribute('data-qf-dim');
+      node.removeAttribute('data-qf-deploy');
+      cardButtons.delete(node);
+    }
+    for (const [k, node] of cards) {
+      const listed = deployList.includes(k);
+      node.toggleAttribute('data-qf-sel', k === key && view === 'issue');
+      node.toggleAttribute('data-qf-dim', view === 'focus' && !!myKeys && !myKeys.has(k));
+      node.toggleAttribute('data-qf-deploy', listed);
+      let actions = cardButtons.get(node);
+      if (!actions) {
+        actions = document.createElement('div');
+        actions.className = 'qf-card-actions';
+        actions.dataset.key = k;
+        actions.innerHTML = '<button type="button" class="qf-card-action">DashFill</button><button type="button" class="qf-card-action" data-deploy hidden></button>';
+        actions.firstElementChild.setAttribute('aria-label', 'DashFill · ' + k);
+        for (const type of ['pointerdown', 'mousedown', 'keydown', 'keyup']) actions.addEventListener(type, e => e.stopPropagation());
+        actions.onclick = e => {
+          const button = e.target.closest('button');
+          if (!button) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const selected = cardAt(node);
+          if (dialogOpen || !selected) return;
+          if (button.hasAttribute('data-deploy') || e.shiftKey) toggleDeploy(selected.key);
+          else openIssue(selected.key);
+        };
+        node.append(actions);
+        cardButtons.set(node, actions);
+      }
+      const deployButton = actions.lastElementChild;
+      deployButton.hidden = view !== 'deploy';
+      const label = listed ? 'Retirar do deploy' : '+ Deploy';
+      if (deployButton.textContent !== label) {
+        deployButton.textContent = label;
+        deployButton.setAttribute('aria-label', label + ' · ' + k);
+      }
+    }
   }
-
-  /* Aba lateral no card: aparece ao passar o mouse, na borda direita do card. */
-  function hideTab() { card = null; sideTab.hidden = true; }
-  function placeTab() {
-    if (!card?.node.isConnected || !active) return hideTab();
-    const r = card.node.getBoundingClientRect(), top = dock.hidden ? innerHeight : dock.getBoundingClientRect().top;
-    if (r.bottom < 0 || r.top > innerHeight || r.top >= top - 12) return hideTab();
-    const h = Math.max(36, Math.min(r.height - 6, top - r.top - 6));
-    Object.assign(sideTab.style, { left: r.right - 30 + 'px', top: r.top + 3 + 'px', height: h + 'px' });
-    sideTab.classList.toggle('short', h < 84);
-  }
-  function labelTab() {
-    if (!card) return;
-    const inList = deployList.includes(card.key);
-    const dep = view === 'deploy';
-    sideTab.classList.toggle('dep', dep);
-    sideTab.classList.toggle('in', dep && inList);
-    $('.st-ic').textContent = dep ? (inList ? '−' : '+') : '›';
-    $('.st-t').textContent = dep ? (inList ? 'Tirar' : 'Deploy') : 'DashFill';
-    sideTab.title = dep ? `${inList ? 'Tirar' : 'Colocar'} ${card.key} na lista de deploy (ou Shift+clique no card)` : `Ver ${card.key} no DashFill`;
-    sideTab.setAttribute('aria-label', sideTab.title);
-  }
-  function preview(e) {
-    if (!active || host.contains(e.target)) return;
-    const found = cardAt(e.target);
-    if (!found) return;
-    card = found; sideTab.hidden = false; labelTab(); placeTab();
-  }
-  document.addEventListener('pointerover', preview, true);
-  document.addEventListener('focusin', preview, true);
-  document.addEventListener('dragstart', hideTab, true);
   document.addEventListener('click', (e) => {
-    if (!active || !e.shiftKey) return;
+    if (!active || dialogOpen || !e.shiftKey || e.target.closest?.('.qf-card-action')) return;
     const found = cardAt(e.target);
-    if (!found) return;
+    if (!found || !cardButtons.has(found.node)) return;
     e.preventDefault(); e.stopPropagation();
     toggleDeploy(found.key);
   }, true);
-  sideTab.onclick = () => {
-    if (!card) return;
-    if (view === 'deploy') { toggleDeploy(card.key); labelTab(); return; }
-    openIssue(card.key);
-  };
 
   /* Botões sobre as colunas: listar todas as demandas da coluna na barra. */
   function placeColButtons() {
-    if (!active) { colBox.replaceChildren(); return; }
+    if (!active || dialogOpen) { colBox.replaceChildren(); return; }
     const cols = columns(), top = dock.hidden ? innerHeight : dock.getBoundingClientRect().top;
     const html = cols.map((c, i) => {
       const r = c.head.getBoundingClientRect();
@@ -395,36 +404,67 @@
     }
     host.style.setProperty('--rail', (rail?.width || Math.min(200, innerWidth * 0.24)) + 'px');
     host.style.setProperty('--left', (rail?.left || 0) + 'px');
-    placeTab();
+    // Alguns quadros usam uma trilha horizontal independente, fixada no rodapé.
+    let clearance = 0;
+    const tracks = new Set(document.querySelectorAll('[role="scrollbar"],[data-testid*="scrollbar" i],[data-testid*="horizontal-scroll" i]'));
+    // Trilhas nativas sincronizadas podem ser irmãs do quadro sem role ou testid.
+    for (let y = innerHeight - 2; y >= innerHeight - 96; y -= 8) {
+      for (const el of document.elementsFromPoint(innerWidth * .66, y)) {
+        if (el.clientHeight <= 32 && el.scrollWidth > el.clientWidth && /(scroll|auto)/.test(getComputedStyle(el).overflowX)) tracks.add(el);
+      }
+    }
+    for (const track of tracks) {
+      if ([...reserved.keys()].some(scroller => scroller.contains(track))) continue;
+      const r = track.getBoundingClientRect();
+      if (r.height > 0 && r.height <= 32 && r.width > 100 && r.top >= innerHeight - 100 && r.top < innerHeight) {
+        clearance = Math.max(clearance, innerHeight - r.top + 2);
+      }
+    }
+    host.style.setProperty('--scroll-clearance', clearance + 'px');
     placeColButtons();
   }
   /* Reserva espaço para a barra: limita a altura das áreas de rolagem do quadro (vertical e horizontal)
    * para que nenhuma barra de rolagem do Jira fique escondida atrás do DashFill. */
+  function restoreScroller(node, saved) {
+    for (const [prop, limit] of Object.entries(saved)) {
+      if (node.style.getPropertyValue(prop) === limit.applied) {
+        node.style.setProperty(prop, limit.original, limit.priority);
+      }
+    }
+    reserved.delete(node);
+  }
   function releaseBoard() {
-    for (const [node, r] of reserved) { if (node.style.maxHeight === r.ours) node.style.maxHeight = r.original; }
-    reserved.clear();
+    for (const [node, saved] of reserved) restoreScroller(node, saved);
   }
   function reserveBoard() {
-    if (!active || dock.hidden) return releaseBoard();
-    const col = document.querySelector(COL_SEL);
+    const col = active && !dialogOpen && !dock.hidden && (document.querySelector(COL_SEL) || cardButtons.keys().next().value || document.querySelector(CARD_SEL));
     if (!col) return releaseBoard();
-    const top = dock.getBoundingClientRect().top;
-    const want = new Set();
-    for (let n = col.parentElement; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
-      if (n.matches('main,[role=main]')) break;
-      const css = getComputedStyle(n), r = n.getBoundingClientRect();
-      const scrollsY = /(auto|scroll)/.test(css.overflowY) && r.width > innerWidth * 0.45;
-      const scrollsX = /(auto|scroll)/.test(css.overflowX) && n.scrollWidth > n.clientWidth + 2;
-      if ((scrollsY || scrollsX) && r.bottom > top - 4) want.add(n);
-      if (scrollsY && !scrollsX) break;
+    const ceiling = dock.getBoundingClientRect().top - 4;
+    const wanted = new Set();
+    // O scroll vertical pode estar dentro do horizontal. Inclui também o próprio main.
+    for (let node = col; node && node !== document.documentElement; node = node.parentElement) {
+      if (node === document.scrollingElement) break;
+      const css = getComputedStyle(node), rect = node.getBoundingClientRect();
+      const horizontal = /(auto|scroll|overlay)/.test(css.overflowX) && node.scrollWidth > node.clientWidth;
+      const vertical = /(auto|scroll|overlay)/.test(css.overflowY) && rect.width > innerWidth * .45;
+      if ((!horizontal && !vertical) || (!reserved.has(node) && rect.bottom <= ceiling)) continue;
+      wanted.add(node);
+      let saved = reserved.get(node);
+      if (!saved) { saved = {}; reserved.set(node, saved); }
+      const chromeHeight = css.boxSizing === 'border-box' ? 0 : parseFloat(css.paddingTop) + parseFloat(css.paddingBottom) + parseFloat(css.borderTopWidth) + parseFloat(css.borderBottomWidth);
+      const available = Math.max(0, Math.floor(ceiling - rect.top - chromeHeight));
+      for (const prop of ['max-height', 'min-height']) {
+        const currentValue = node.style.getPropertyValue(prop);
+        if (!saved[prop] || currentValue !== saved[prop].applied) {
+          saved[prop] = { original: currentValue, priority: node.style.getPropertyPriority(prop), computed: css.getPropertyValue(prop) };
+        }
+        const initial = saved[prop].computed;
+        const value = prop === 'min-height' ? '0px' : initial === 'none' ? available + 'px' : 'min(' + initial + ', ' + available + 'px)';
+        if (currentValue !== value) node.style.setProperty(prop, value, 'important');
+        saved[prop].applied = node.style.getPropertyValue(prop);
+      }
     }
-    for (const [node] of reserved) if (!want.has(node)) { const r = reserved.get(node); if (node.style.maxHeight === r.ours) node.style.maxHeight = r.original; reserved.delete(node); }
-    for (const node of want) {
-      if (!reserved.has(node)) reserved.set(node, { original: node.style.maxHeight, ours: null });
-      const r = reserved.get(node);
-      r.ours = Math.max(120, Math.floor(top - node.getBoundingClientRect().top - 6)) + 'px';
-      if (node.style.maxHeight !== r.ours) node.style.maxHeight = r.ours;
-    }
+    for (const [node, saved] of reserved) if (!wanted.has(node)) restoreScroller(node, saved);
   }
 
   /* ================================================================ */
@@ -465,7 +505,7 @@
         ${running}
         ${doingHtml ? `<div class="sub">Em andamento</div>${doingHtml}` : '<div class="sub">Nada em andamento no seu nome</div>'}
         <div class="quick">
-          <button data-mode="focus">Foco</button><button data-mode="prs">PRs</button><button data-mode="returns">Retornos</button><button data-mode="daily">Daily</button>
+          <button data-mode="focus">Foco</button><button data-mode="prs">PRs</button><button data-mode="returns">Retornos</button>
           <button data-mode="deploy" class="dq">Deploy <b>${deployList.length}</b></button>
         </div>
         <button class="lnk" data-action="day" aria-expanded="false">Abrir meu dia completo ›</button>`;
@@ -492,22 +532,23 @@
   /* ================================================================ */
   function drawBar() {
     const fold = $('[data-action=fold]');
-    fold.textContent = folded ? '⌃' : '⌄';
+    fold.querySelector('b').textContent = folded ? 'Abrir painel' : 'Recolher';
+    sizesEl.hidden = folded;
     fold.setAttribute('aria-expanded', String(!folded));
     body.hidden = folded;
     dock.classList.toggle('open', !folded);
     dock.dataset.view = view;
-    modesEl.innerHTML = MODES.map(([id, label, tip]) => `<button class="mode ${view === id || (id === 'issue' && view === 'column') ? 'on' : ''} ${id}" data-mode="${id}" title="${esc(tip)}" aria-pressed="${view === id}">${label}${id === 'deploy' ? ` <b>${deployList.length}</b>` : id === 'focus' && focus ? ' <i class="dot"></i>' : ''}</button>`).join('');
+    modesEl.innerHTML = MODES.map(([id, label, tip]) => `<button class="mode ${view === id || (id === 'issue' && view === 'column') ? 'on' : ''}" data-mode="${id}" title="${esc(tip)}" aria-pressed="${view === id || (id === 'issue' && view === 'column')}">${label}${id === 'deploy' ? ` <b>${deployList.length}</b>` : id === 'focus' && focus ? ' <i class="dot"></i>' : ''}</button>`).join('');
     sizesEl.innerHTML = [['s', 'Baixa'], ['m', 'Média'], ['l', 'Alta']].map(([id, l]) => `<button class="sz ${size === id ? 'on' : ''}" data-size="${id}" title="Altura ${l.toLowerCase()}" aria-label="Altura ${l.toLowerCase()}" aria-pressed="${size === id}"><i class="${id}"></i></button>`).join('');
     const dq = day.querySelector('.dq b');
     if (dq) dq.textContent = deployList.length;
     if (view === 'issue') {
       whoEl.innerHTML = key
         ? `<span class="k">${esc(key)}</span>${current ? `<span class="pill ${statusTone(current.cat, current.status)}">${esc(current.status)}</span><b class="ttl" title="${esc(current.summary)}">${esc(current.summary)}</b>` : '<span class="hint">carregando…</span>'}`
-        : '<span class="hint">Passe o mouse num card e clique na aba <b>DashFill</b> que aparece na borda dele</span>';
+        : '<span class="hint">Selecione <b>DashFill</b> em um card do quadro.</span>';
       tabsEl.hidden = !key || folded;
       tabsEl.innerHTML = TABS.map(([id, l]) => {
-        const n = !current ? '' : id === 'git' ? current.branches.length + current.dev.prs.length : id === 'docs' ? current.links.figma.length + current.links.confluence.length + current.links.other.length + (current.f.issuelinks || []).length : id === 'comments' ? current.comments : '';
+        const n = !current ? '' : id === 'envs' ? current.envs.length : id === 'git' ? current.branches.length + current.sql.length + current.dev.prs.length : id === 'docs' ? current.links.figma.length + current.links.confluence.length + current.links.other.length + (current.f.issuelinks || []).length : id === 'comments' ? current.comments : '';
         return `<button class="tab ${id === tab ? 'on' : ''}" data-tab="${id}" aria-pressed="${id === tab}">${l}${n !== '' ? ` <i class="n">${n}</i>` : ''}</button>`;
       }).join('');
     } else {
@@ -521,20 +562,21 @@
   }
 
   function setView(v) {
-    view = v; confirmBox = null; folded = false; hideTab();
+    view = v; confirmBox = null; folded = false;
     drawBar(); render(); paintCards();
   }
-  async function openIssue(k, force = false) {
+  async function openIssue(k, force = false, nextTab) {
     if (!validKey(k)) return;
-    if (k !== key) tab = 'resumo';
+    if (k !== key || nextTab) { tab = nextTab || 'resumo'; body.scrollTop = 0; }
     key = k; view = 'issue'; folded = false; confirmBox = null;
     current = !force && cache.has(k) ? cache.get(k).data : null;
     drawBar(); paintCards();
     const s = ++seq;
     if (!current) body.innerHTML = skeleton();
     try {
-      current = await issueData(k, force);
-      if (s !== seq) return;
+      const result = await issueData(k, force);
+      if (s !== seq || view !== 'issue') return;
+      current = result;
       drawBar(); render();
     } catch (e) { if (s === seq) body.innerHTML = note(e.message + ' Use ↻ para tentar de novo.', 'err'); }
   }
@@ -547,24 +589,29 @@
     if (view === 'focus') return renderFocus();
     if (view === 'prs') return renderPrs();
     if (view === 'returns') return renderReturns();
-    if (view === 'daily') return renderDaily();
     if (view === 'deploy') return renderDeploy();
   }
 
   /* ---------------- Demanda ---------------- */
   function renderIssue() {
     if (!key) {
-      body.innerHTML = `<div class="empty"><b>Escolha uma demanda no quadro</b><p>Passe o mouse num card e clique na aba <b>DashFill</b> na borda dele. Ou use os modos acima: <b>Foco</b>, <b>PRs</b>, <b>Retornos</b>, <b>Daily</b> e <b>Deploy</b>.</p></div>`;
+      body.innerHTML = `<div class="empty"><b>Escolha uma demanda no quadro</b><p>Selecione o botão <b>DashFill</b> no card para ler a descrição, consultar branches e ver os comentários.</p></div>`;
       return;
     }
     if (!current) return;
     const d = current, f = d.f;
     if (tab === 'resumo') {
-      const t = timeOf(f.timetracking), r = readiness(d), main = d.branches[0], pr = d.dev.prs[0];
+      const t = timeOf(f.timetracking), r = readiness(d);
       const due = f.duedate ? new Date(f.duedate + 'T12:00') : null, late = due && due < new Date() && d.cat !== 'done';
-      body.innerHTML = `<div class="sum">
+      const comment = (f.comment?.comments || []).at(-1);
+      body.innerHTML = `<div class="summary-tools">
+        <button class="btn pri" data-focus="${esc(d.key)}">${focus?.key === d.key ? 'Ver foco atual' : 'Iniciar foco'}</button>
+        <button class="btn" data-toggle-deploy="${esc(d.key)}">${deployList.includes(d.key) ? 'Retirar do deploy' : 'Adicionar ao deploy'}</button>
+        <a class="btn" href="/browse/${esc(d.key)}" target="_blank" rel="noopener">Abrir no Jira ↗</a>
+        <button class="btn" data-copy="${esc(d.key)} — ${esc(d.summary)}">Copiar chave e título</button>
+      </div><div class="sum">
         <section class="s-main">
-          <div class="chips">
+          <h3>Descrição da demanda</h3><div class="chips">
             ${f.issuetype?.name ? `<span class="chip">${esc(f.issuetype.name)}</span>` : ''}
             ${f.priority?.name ? `<span class="chip pr-${esc(f.priority.name.toLowerCase())}">Prioridade ${esc(f.priority.name)}</span>` : ''}
             ${(f.labels || []).slice(0, 4).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}
@@ -573,43 +620,24 @@
           <div class="rich desc">${f.description ? adf(f.description) : '<p class="muted">Sem descrição.</p>'}</div>
         </section>
         <aside class="s-side">
+          <section class="summary-comments">
+            <div class="section-head"><h3>Comentários <span>${d.comments}</span></h3><button class="btn sm" data-tab="comments">${d.comments ? 'Ver comentários' : 'Comentar'}</button></div>
+            ${comment ? `<b>${esc(comment.author?.displayName || 'Comentário')}</b><p>${esc(plain(comment.body))}</p>` : note(d.comments ? 'Consulte os comentários da demanda.' : 'Ainda não há comentários.')}
+          </section>
           <div class="facts">
             <div class="fact">${avatar(f.assignee?.displayName || 'Sem responsável')}<span><small>Responsável</small><b>${esc(f.assignee?.displayName || 'Sem responsável')}</b></span></div>
             <div class="fact"><span class="fi ${late ? 'bad' : ''}">◷</span><span><small>Data limite</small><b class="${late ? 'bad-t' : ''}">${due ? esc(due.toLocaleDateString('pt-BR')) + (late ? ' · atrasada' : '') : 'sem data'}</b></span></div>
             <div class="fact"><span class="fi">↻</span><span><small>Atualizada</small><b>${esc(ago(f.updated))}</b></span></div>
           </div>
           <div class="tt"><div class="row"><small>Controle de tempo</small><b>${esc(t.txt)}</b><span class="muted">de ${esc(t.estTxt)}</span></div><div class="meter ${t.over ? 'over' : ''}"><i style="width:${t.pct}%"></i></div></div>
-          <div class="ready ${r.tone}">
-            <div class="row"><b>Para o deploy</b><span class="pill ${r.tone}">${esc(r.txt)}</span></div>
-            ${main ? `<div class="br"><code title="${esc(main.name)}">${esc(main.name)}</code><button class="btn sm" data-copy="${esc(main.name)}">Copiar</button></div>` : '<p class="note">Nenhuma branch ligada.</p>'}
-            ${pr ? `<a class="pr" href="${esc(pr.url)}" target="_blank" rel="noopener"><span class="pill ${prTone(pr.state)}">${esc(prLabel(pr.state))}</span><span class="pr-t">${esc(pr.title)}</span><small>${esc(pr.from)} → ${esc(pr.to)}</small></a>` : ''}
-            <div class="row gap"><button class="btn sm ${deployList.includes(d.key) ? '' : 'pri'}" data-toggle-deploy="${esc(d.key)}">${deployList.includes(d.key) ? 'Tirar do deploy' : '+ Deploy'}</button>${main ? `<button class="btn sm" data-copy="git fetch origin && git checkout ${esc(main.name)}">Copiar checkout</button>` : ''}<button class="btn sm" data-focus="${esc(d.key)}">${focus?.key === d.key ? 'Em foco' : 'Focar'}</button></div>
-          </div>
-          <div class="row gap"><a class="btn sm" href="/browse/${esc(d.key)}" target="_blank" rel="noopener">Abrir no Jira ↗</a><button class="btn sm" data-copy="${esc(d.key)} — ${esc(d.summary)}">Copiar chave e título</button></div>
+          <div class="section-head"><span class="pill ${r.tone}">${esc(r.txt)}</span><button class="btn sm" data-tab="git">Ver branches e SQL</button></div>
         </aside>
       </div>`;
       return;
     }
-    if (tab === 'git') {
-      const prs = d.dev.prs.map((p) => {
-        const ok = p.reviewers.filter((x) => x.ok).length;
-        return `<article class="g-card pr-card ${p.state.toLowerCase()}">
-          <div class="row"><span class="pill ${prTone(p.state)}">${esc(prLabel(p.state))}</span><a class="g-t" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a><span class="muted">${esc(p.id)}</span></div>
-          <div class="flow"><code>${esc(p.from)}</code><span class="arr">→</span><code>${esc(p.to)}</code></div>
-          <div class="row gap muted">${esc(p.repo)}${p.at ? ' · atualizado ' + esc(ago(p.at)) : ''}<span class="grow"></span>${p.reviewers.length ? `<span class="revs">${p.reviewers.map((x) => `<span class="rev ${x.ok ? 'ok' : ''}" title="${esc(x.name)}${x.ok ? ' aprovou' : ' ainda não aprovou'}">${esc(initials(x.name))}</span>`).join('')}</span><span>${ok}/${p.reviewers.length} aprovações</span>` : '<span>sem revisores</span>'}</div>
-        </article>`;
-      }).join('');
-      const brs = d.branches.map((b) => `<article class="g-card">
-          <div class="row"><span class="g-ic">⎇</span><code class="g-name" title="${esc(b.name)}">${esc(b.name)}</code></div>
-          <div class="muted small">${esc(b.repo || (b.fromField ? 'campo Branch do Jira' : ''))}${b.commit ? ` · último commit <code>${esc(b.commit)}</code>` : ''}${b.at ? ' · ' + esc(ago(b.at)) : ''}</div>
-          ${b.commitMsg ? `<div class="small">${esc(b.commitMsg.slice(0, 120))}</div>` : ''}
-          <div class="row gap"><button class="btn sm" data-copy="${esc(b.name)}">Copiar nome</button><button class="btn sm" data-copy="git fetch origin && git checkout ${esc(b.name)}">Copiar checkout</button><button class="btn sm" data-copy="git fetch origin && git merge --no-ff origin/${esc(b.name)}">Copiar merge</button>${b.url ? `<a class="btn sm" href="${esc(b.url)}" target="_blank" rel="noopener">Abrir ↗</a>` : ''}</div>
-        </article>`).join('');
-      body.innerHTML = `<div class="cols2">
-        <section><h3>Pull requests <span class="muted">${d.dev.prs.length}</span></h3>${prs || `<div class="empty sm"><p>Nenhum PR ligado a ${esc(d.key)}.</p></div>`}</section>
-        <section><h3>Branches <span class="muted">${d.branches.length}</span></h3>${brs || `<div class="empty sm"><p>Nenhuma branch. Use a chave no nome da branch (ex.: <code>feat/${esc(d.key.toLowerCase())}/…</code>) para o Jira ligar sozinho.</p></div>`}
-        ${d.dev.builds ? `<p class="muted small">${d.dev.builds} build(s) no painel Desenvolvimento.</p>` : ''}${d.dev.error ? note('Painel Desenvolvimento indisponível: ' + d.dev.error) : ''}</section>
-      </div>`;
+    if (tab === 'git') { body.innerHTML = developmentHtml(d); return; }
+    if (tab === 'envs') {
+      body.innerHTML = `<div class="development">${commandSection(d.envs, true)}${originalFields(d)}</div>`;
       return;
     }
     if (tab === 'docs') {
@@ -635,8 +663,57 @@
         sh.innerHTML = `<link rel="stylesheet" href="${url('modal.css')}"><style>:host{display:block;color:#e3e8ee;font:13px/1.45 -apple-system,'Segoe UI',sans-serif}.hist-dlg{max-width:none;max-height:none;box-shadow:none;background:transparent;border:0}.hist-body{max-height:none;overflow:visible}</style><div class="hist-dlg"></div>`;
         loadAccent('dev', body.firstChild);
         renderHistory(sh.querySelector('.hist-dlg'), data, { key: d.key, base: location.origin, openIssue: () => window.open('/browse/' + d.key, '_blank', 'noopener'), onClose: () => { folded = true; drawBar(); } });
-      }).catch((e) => { if (s === seq) body.innerHTML = note(e.message, 'err'); });
+      }).catch((e) => { if (s === seq && view === 'issue' && tab === 'history') body.innerHTML = note(e.message, 'err'); });
     }
+  }
+
+  function commandSection(entries, env) {
+    const noun = env ? 'ENV' : 'SQL', title = env ? 'Variáveis de ambiente' : 'Comandos SQL';
+    const all = entries.map(entry => entry.command).join(env ? '\n' : '\n\n');
+    const rows = entries.map(({ section, command }, i) => {
+      const heading = section && section !== entries[i - 1]?.section ? `<li class="env-group">${esc(section)}</li>` : '';
+      return heading + `<li class="sql-row"><pre>${esc(command)}</pre><button class="btn sm" data-copy="${esc(command)}">Copiar ${noun}</button></li>`;
+    }).join('');
+    return `<div class="section-head"><h3>${title} <span>${entries.length}</span></h3>${entries.length > 1 ? `<button class="btn sm" data-copy="${esc(all)}">${env ? 'Copiar todas as ENVs' : 'Copiar todo o SQL'}</button>` : ''}</div>
+      ${rows ? `<ul class="ref-list">${rows}</ul>` : note(env ? 'Nenhuma ENV identificada nesta demanda.' : 'Nenhum comando SQL identificado nesta demanda.')}`;
+  }
+
+  function originalFields(d) {
+    const fields = d.sources.map(({ name, value, text }) =>
+      `<section class="source-field"><h4>${esc(name)}</h4>${value?.type === 'doc' ? `<div class="rich">${adf(value)}</div>` : `<pre>${esc(text)}</pre>`}</section>`).join('');
+    const warning = d.fieldsUnavailable ? note('Não foi possível carregar os campos de desenvolvimento. Use Atualizar para tentar novamente.', 'err') : '';
+    return `${warning}<details class="source-fields"><summary>Ver texto original da demanda <span class="k">${esc(d.key)}</span></summary>${fields || note('Nenhum campo de desenvolvimento ou descrição preenchido.')}</details>`;
+  }
+
+  function developmentHtml(d, deploy = false) {
+    const prs = d.dev.prs.map((p) => {
+      const ok = p.reviewers.filter((x) => x.ok).length;
+      return `<article class="g-card pr-card ${p.state.toLowerCase()}">
+        <div class="row"><span class="pill ${prTone(p.state)}">${esc(prLabel(p.state))}</span><a class="g-t" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a><span class="muted">${esc(p.id)}</span></div>
+        <div class="flow"><code>${esc(p.from)}</code><span class="arr">→</span><code>${esc(p.to)}</code></div>
+        <div class="row gap muted">${esc(p.repo)}${p.at ? ' · atualizado ' + esc(ago(p.at)) : ''}<span class="grow"></span>${p.reviewers.length ? `<span class="revs">${p.reviewers.map((x) => `<span class="rev ${x.ok ? 'ok' : ''}" title="${esc(x.name)}${x.ok ? ' aprovou' : ' ainda não aprovou'}">${esc(initials(x.name))}</span>`).join('')}</span><span>${ok}/${p.reviewers.length} aprovações</span>` : '<span>sem revisores</span>'}</div>
+      </article>`;
+    }).join('');
+    const branchText = d.branches.map(b => {
+      const { checkout, merge } = branchCommands(b.name);
+      return [b.repo ? b.repo + ' · ' + b.name : b.name, checkout, merge].join('\n');
+    });
+    const all = [...branchText, ...d.sql, ...(deploy ? d.envs.map(e => e.command) : [])].join('\n\n');
+    const brs = d.branches.map(b => {
+      const { checkout, merge } = branchCommands(b.name);
+      return `<li class="branch-row"><div class="ref-name">${b.repo ? `<small>${esc(b.repo)}</small>` : ''}<code>${esc(b.name)}</code></div>
+        <div class="row gap"><button class="btn sm" data-copy="${esc(b.name)}">Copiar nome</button><button class="btn sm" data-copy="${esc(checkout)}" title="${esc(checkout)}">Copiar checkout</button><button class="btn sm" data-copy="${esc(merge)}" title="${esc(merge)}">Copiar merge</button></div></li>`;
+    }).join('');
+    return `<div class="development">
+      <div class="section-head"><h3>Branches <span>${d.branches.length}</span></h3>${all ? `<button class="btn pri" data-copy="${esc(all)}" title="Copiar os comandos e nomes desta demanda">Copiar tudo</button>` : ''}</div>
+      ${brs ? `<ul class="ref-list">${brs}</ul>` : note('Nenhuma branch vinculada.')}
+      ${!deploy || d.sql.length ? commandSection(d.sql.map(command => ({ command })), false) : ''}
+      ${deploy && d.envs.length ? commandSection(d.envs, true) : ''}
+      ${!deploy || prs ? `<div class="section-head"><h3>Pull requests <span>${d.dev.prs.length}</span></h3></div>
+      ${prs || note('Nenhum pull request vinculado.')}` : ''}
+      ${d.dev.builds ? note(d.dev.builds + ' build(s) no painel Desenvolvimento.') : ''}${d.dev.error ? note('Painel Desenvolvimento indisponível: ' + d.dev.error) : ''}
+      ${originalFields(d)}
+    </div>`;
   }
 
   async function renderComments(d) {
@@ -670,7 +747,7 @@
       </div>`;
       const ed = body.querySelector('.editor');
       ed.innerHTML = drafts.get(d.key) || '';
-    } catch (e) { if (s === seq) body.innerHTML = note(e.message + ' Use ↻ para tentar de novo.', 'err'); }
+    } catch (e) { if (s === seq && view === 'issue' && tab === 'comments') body.innerHTML = note(e.message + ' Use ↻ para tentar de novo.', 'err'); }
   }
 
   /* ---------------- Coluna ---------------- */
@@ -737,7 +814,7 @@
   function startFocus(k, title) {
     focus = { key: k, title: title || cache.get(k)?.data?.summary || '', start: Date.now() };
     saveFocus(); confirmBox = null;
-    if (view === 'focus') renderFocus(); else drawBar();
+    if (view === 'focus') renderFocus(); else { drawBar(); render(); }
     refreshDay();
   }
   const jiraStarted = (ms) => { const d = new Date(ms), z = -d.getTimezoneOffset(), p = (n) => String(Math.abs(n)).padStart(2, '0');
@@ -801,34 +878,6 @@
   let meId = null;
   const myKeysHas = (i) => (meId ? i.fields.assignee.accountId === meId : false);
 
-  /* ---------------- Modo Daily ---------------- */
-  async function renderDaily() {
-    const s = ++seq;
-    body.innerHTML = skeleton();
-    try {
-      const fields = ['summary', 'status'];
-      const [moved, logged, doing, stuck] = await Promise.all([
-        jql('status CHANGED BY currentUser() AFTER startOfDay(-1) ORDER BY updated DESC', fields, 20, { expand: 'changelog' }).catch(() => []),
-        jql('worklogAuthor = currentUser() AND worklogDate >= startOfDay(-1) ORDER BY updated DESC', fields, 20).catch(() => []),
-        jql('assignee = currentUser() AND statusCategory = "In Progress" ORDER BY priority DESC', fields, 10).catch(() => []),
-        jql('assignee = currentUser() AND statusCategory != Done AND status in (Impedido, "Impedido/Aguardando", Aguardando, Bloqueado) ORDER BY updated DESC', fields, 10).catch(() => []),
-      ]);
-      if (s !== seq || view !== 'daily') return;
-      const line = (i) => `${i.key} — ${i.fields?.summary || ''}`;
-      const movedTxt = moved.map((i) => {
-        const t = (i.changelog?.histories || []).flatMap((h) => (h.items || []).filter((x) => x.field === 'status').map((x) => ({ at: h.created, to: x.toString }))).sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
-        return `${line(i)}${t ? ` (foi para ${t.to})` : ''}`;
-      });
-      const ontem = [...new Set([...movedTxt, ...logged.filter((i) => !moved.some((m) => m.key === i.key)).map((i) => line(i) + ' (horas apontadas)')])];
-      const hoje = doing.filter((i) => !stuck.some((x) => x.key === i.key)).map(line);
-      const imp = stuck.map(line);
-      const text = `Ontem:\n${ontem.map((l) => '- ' + l).join('\n') || '- nada registrado'}\n\nHoje:\n${hoje.map((l) => '- ' + l).join('\n') || '- a definir'}\n\nImpedimentos:\n${imp.map((l) => '- ' + l).join('\n') || '- nenhum'}`;
-      const block = (t, list, tone) => `<section class="dl ${tone}"><h3>${t} <span class="muted">${list.length}</span></h3>${list.length ? `<ul>${list.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : '<p class="note">Nada aqui.</p>'}</section>`;
-      body.innerHTML = `<div class="daily"><div class="dls">${block('Ontem', ontem, 'muted')}${block('Hoje', hoje, 'data')}${block('Impedimentos', imp, imp.length ? 'warn' : 'muted')}</div>
-        <aside class="dl-out"><b>Texto para a daily</b><textarea class="inp" rows="9" aria-label="Texto da daily">${esc(text)}</textarea><button class="btn sm pri" data-copy-from="textarea">Copiar para o Teams</button><p class="muted small">Ajuste o texto antes de copiar.</p></aside></div>`;
-    } catch (e) { if (s === seq) body.innerHTML = note(e.message, 'err'); }
-  }
-
   /* ---------------- Modo Deploy ---------------- */
   function toggleDeploy(k) {
     if (!validKey(k)) return;
@@ -840,7 +889,7 @@
   async function renderDeploy() {
     const s = ++seq;
     if (!deployList.length) {
-      body.innerHTML = `<div class="empty"><b>Monte a lista do deploy</b><p>Passe o mouse num card e clique na aba <b>+ Deploy</b> na borda dele, ou Shift+clique no card. O QuickFill junta branch e PR de cada demanda e prepara o comando, as notas e o card "Realizando Deploy".</p>
+      body.innerHTML = `<div class="empty"><b>Monte a lista do deploy</b><p>Clique em <b>+ Deploy</b> no card, ou Shift+clique no card. O QuickFill junta branch e PR de cada demanda e prepara o comando, as notas e o card "Realizando Deploy".</p>
         <button class="btn sm pri" data-action="add-feito">Adicionar tudo de Feito / PR</button></div>`;
       return;
     }
@@ -848,19 +897,28 @@
     const rows = await mapLimit(deployList, 4, (k) => issueData(k));
     if (s !== seq || view !== 'deploy') return;
     const ok = rows.filter((r) => !r.error);
-    const branches = [...new Set(ok.map((r) => r.branches[0]?.name).filter(Boolean))];
+    const branches = [...new Set(ok.flatMap(r => r.branches.map(b => b.name)))];
     const warn = ok.filter((r) => readiness(r).tone === 'warn');
-    const cmd = branches.length ? ['git fetch origin', ...branches.map((b) => `git merge --no-ff origin/${b}`)].join('\n') : '';
+    const repos = new Map();
+    for (const r of ok) for (const b of r.branches) {
+      const repo = b.repo || '';
+      if (!repos.has(repo)) repos.set(repo, new Set());
+      repos.get(repo).add(b.name);
+    }
+    const gitActions = [...repos].map(([repo, names]) => {
+      const commands = ['git fetch origin', ...[...names].map(name => branchCommands(name).mergeOnly)];
+      return `<button class="act" data-copy="${esc(commands.join('\n'))}"><b>Copiar comando Git</b><span>${esc(repo || 'Repositório não informado')} · ${names.size} branch(es)</span></button>`;
+    }).join('');
     const notes = ok.map((r) => `- [${r.key}] ${r.summary}`).join('\n');
     body.innerHTML = `<div class="dep">
       <section class="dep-l">
         <div class="list-h"><b>${deployList.length} ${deployList.length === 1 ? 'demanda' : 'demandas'}</b><span class="muted">${branches.length} ${branches.length === 1 ? 'branch' : 'branches'}${warn.length ? ` · <span class="warn-t">${warn.length} pedem atenção</span>` : ' · tudo pronto'}</span><span class="grow"></span><button class="btn sm" data-action="add-feito">+ Tudo de Feito / PR</button><button class="btn sm" data-action="clear-deploy">Limpar</button></div>
-        <div class="rows">${rows.map((r) => r.error ? `<div class="rw err"><span class="k">${esc(r.key)}</span><span class="err-t">${esc(r.error)}</span><button class="ic sm" data-toggle-deploy="${esc(r.key)}">✕</button></div>` : rowHtml(r)).join('')}</div>
+        <div class="rows">${rows.map((r) => r.error ? `<div class="rw err"><span class="k">${esc(r.key)}</span><span class="err-t">${esc(r.error)}</span><button class="ic sm" data-toggle-deploy="${esc(r.key)}">✕</button></div>` : `<article class="deploy-issue">${rowHtml(r)}${developmentHtml(r, true)}</article>`).join('')}</div>
       </section>
       <aside class="dep-a">
         <h3>Preparar</h3>
         <button class="act" data-copy="${esc(branches.join('\n'))}" ${branches.length ? '' : 'disabled'}><b>Copiar branches</b><span>uma por linha</span></button>
-        <button class="act" data-copy="${esc(cmd)}" ${cmd ? '' : 'disabled'}><b>Copiar comando git</b><span>fetch e merge de cada branch</span></button>
+        ${gitActions}
         <button class="act" data-copy="${esc(notes)}"><b>Copiar notas da release</b><span>chave e título, em lista</span></button>
         <h3>No Jira</h3>
         <button class="act" data-action="ask-card"><b>Criar card "Realizando Deploy"</b><span>ligado às demandas da lista</span></button>
@@ -955,7 +1013,8 @@
     if (b.dataset.fmt) { e.preventDefault(); formatCmd(b.dataset.fmt); return; }
     if (b.dataset.mode) {
       const m = b.dataset.mode;
-      if (m === 'issue') { view = 'issue'; folded = false; drawBar(); render(); paintCards(); } else setView(m);
+      if (m === 'issue' && key) openIssue(key); else setView(m);
+      modesEl.querySelector('.on')?.focus({ preventScroll: true });
       return;
     }
     if (b.dataset.size) { size = b.dataset.size; try { localStorage.setItem(SIZE, size); } catch { /* sem storage */ } applySize(); folded = false; drawBar(); render(); return; }
@@ -990,12 +1049,14 @@
       } catch (err) { confirmBox = `<b>Não deu para apontar</b><p>${esc(err.message)}</p><button class="btn sm" data-action="cancel">Voltar</button>`; renderFocus(); }
     }
     else if (a === 'focus-cancel') { focus = null; saveFocus(); confirmBox = null; renderFocus(); refreshDay(); drawBar(); }
-    if (b.dataset.tab) { tab = b.dataset.tab; drawBar(); render(); tabsEl.querySelector('.on')?.focus({ preventScroll: true }); }
+    if (b.dataset.tab) { body.scrollTop = 0; tab = b.dataset.tab; drawBar(); render(); tabsEl.querySelector('.on')?.focus({ preventScroll: true }); }
     if (b.dataset.copy !== undefined) copy(b.dataset.copy, b);
-    if (b.dataset.copyFrom) copy(body.querySelector(b.dataset.copyFrom)?.value || '', b);
     if (b.dataset.toggleDeploy) toggleDeploy(b.dataset.toggleDeploy);
-    if (b.dataset.focus) startFocus(b.dataset.focus, b.dataset.title);
-    if (b.dataset.key) { if (b.dataset.openTab) tab = b.dataset.openTab; const t = tab; await openIssue(b.dataset.key); if (b.dataset.openTab) { tab = t; drawBar(); render(); } }
+    if (b.dataset.focus) {
+      if (focus?.key === b.dataset.focus) setView('focus');
+      else startFocus(b.dataset.focus, b.dataset.title);
+    }
+    if (b.dataset.key) openIssue(b.dataset.key, false, b.dataset.openTab);
   });
 
   // Altura livre: arrastar a borda de cima da barra
@@ -1003,8 +1064,8 @@
     e.preventDefault();
     const y0 = e.clientY, h0 = body.getBoundingClientRect().height || 300;
     const move = (ev) => { applySize(Math.max(160, Math.min(innerHeight * 0.75, h0 + (y0 - ev.clientY)))); reserveBoard(); };
-    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
-    addEventListener('pointermove', move); addEventListener('pointerup', up);
+    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); removeEventListener('pointercancel', up); };
+    addEventListener('pointermove', move); addEventListener('pointerup', up); addEventListener('pointercancel', up);
   });
 
   /* ================================================================ */
@@ -1023,7 +1084,7 @@
       seq++; daySeq++;
       key = ''; current = null; colView = null; expandedDay = false; folded = true; view = 'issue'; confirmBox = null; myKeys = null;
       day.classList.remove('expanded'); day.replaceChildren(); body.replaceChildren(); colBox.replaceChildren();
-      hideTab(); releaseBoard(); paintCards();
+      releaseBoard(); paintCards();
     }
   }
   launch.onclick = () => {
@@ -1046,17 +1107,28 @@
       route = path; enable(false); launch.hidden = !allowed;
       if (allowed && sessionOn) enable(true);
     }
-    if (!active) return;
-    const dialog = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some((el) => el.getClientRects().length && !host.contains(el));
-    dock.hidden = day.hidden = dialog;
-    colBox.hidden = dialog;
-    if (dialog) hideTab();
+    updateDialog();
+    if (!active || dialogOpen) return;
+
     geometry(); reserveBoard(); paintCards(); tick();
     if (!document.hidden && !expandedDay && Date.now() - refreshedAt > 60000) refreshDay();
   }
+  const dialogSelector = 'dialog[open],[role="dialog"],[role="alertdialog"],[aria-modal="true"],.jqf-backdrop';
+  function updateDialog() {
+    const visible = [...document.querySelectorAll(dialogSelector)].some(el =>
+      !el.closest('[hidden],[aria-hidden="true"]') && el.checkVisibility({ visibilityProperty: true }));
+    if (visible === dialogOpen) return;
+    dialogOpen = visible;
+    host.style.display = visible ? 'none' : '';
+    reserveBoard();
+  }
+  new MutationObserver(records => {
+    if (dialogOpen || records.some(record => record.type === 'attributes' ||
+      [...record.addedNodes].some(node => node.nodeType === 1 && (node.matches(dialogSelector) || node.querySelector(dialogSelector))))) updateDialog();
+  }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['role', 'aria-modal', 'aria-hidden', 'open', 'hidden'] });
   new ResizeObserver(() => { reserveBoard(); placeColButtons(); }).observe(dock);
   addEventListener('resize', geometry, { passive: true });
-  addEventListener('scroll', () => { placeTab(); placeColButtons(); }, { passive: true, capture: true });
+  addEventListener('scroll', placeColButtons, { passive: true, capture: true });
   sync();
   setInterval(sync, 1200);
 })().catch((error) => console.warn('QuickFill DEV: não foi possível abrir o DashFill.', error));

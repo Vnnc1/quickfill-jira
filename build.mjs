@@ -84,12 +84,6 @@ export const INSTALL_CMD = ${JSON.stringify(INSTALL_CMD)};
 `;
 }
 
-// O DEV usa o DashFill no quadro. As regras de dados continuam compartilhadas.
-const suspendedBoardFiles = new Set([
-  "board-mode.js", "board-mode.css", "board-detail.css",
-  "lib/board-enhancements.js", "lib/board-timeline.js",
-]);
-
 function manifestJson(p) {
   const src = JSON.parse(readFileSync(join(SRC, "manifest.json"), "utf8"));
   const icons = Object.fromEntries(ICON_SIZES.map((n) => [String(n), `icons/icon${n}.png`]));
@@ -97,9 +91,9 @@ function manifestJson(p) {
   const { manifest_version, name, version, description, ...rest } = src;   // nome, versão e descrição vêm do perfil
   if (p.role === "dev") {
     const scripts = rest.content_scripts[0];
-    scripts.js = [...scripts.js.filter(file => !suspendedBoardFiles.has(file)), "dashfill.js"];
+    scripts.js.push("dashfill.js");
     const assets = rest.web_accessible_resources[0];
-    assets.resources = [...assets.resources.filter(file => !suspendedBoardFiles.has(file)), "dashfill.css"];
+    assets.resources.push("dashfill.css");
   }
   return JSON.stringify({
     manifest_version,
@@ -141,7 +135,6 @@ export function buildProfile(p, { notes = "", released = false } = {}) {
   rmSync(out, { recursive: true, force: true });
   const write = (rel, data) => { mkdirSync(dirname(join(out, rel)), { recursive: true }); writeFileSync(join(out, rel), data); };
   for (const f of listFiles(SRC)) {
-    if (p.role === "dev" && suspendedBoardFiles.has(f)) continue;
     mkdirSync(dirname(join(out, f)), { recursive: true });
     copyFileSync(join(SRC, f), join(out, f));
   }
