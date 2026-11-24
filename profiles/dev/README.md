@@ -2,10 +2,32 @@
 
 Painel para o dia a dia de quem desenvolve. Mostra **como está o seu dia**, **como você vem
 indo nos últimos dias** e **onde estão as suas demandas**, sempre de olho na equipe.
-É só de leitura: nada é alterado no Jira. Para apontar horas e criar subtarefas, use o Jira ou o
-**QuickFill QA**.
+As abas do painel são só de leitura. No quadro do Jira, o **DashFill** aponta as horas pelo cronômetro do
+Meu dia e, no Deploy, cria o card "Realizando Deploy" e move as demandas (sempre pedindo confirmação).
+Para criar subtarefas, use o Jira ou o **QuickFill QA**.
 
 A barra **Espaço · Todos | MEED | SUS** vale para todas as abas.
+
+## DashFill no quadro
+
+Ligue pelo botão **DashFill** no canto do quadro. Ao passar o mouse num card aparecem, na lateral direita
+dele, **+** (abre a demanda na barra de baixo) e **⇪** (coloca ou tira da lista do deploy). Os botões ficam
+por cima do próprio card, sem mudar a altura dele; um card na lista do deploy deixa o ⇪ sempre à vista.
+
+**Cronômetro no Meu dia** (lateral esquerda):
+
+- **Começa sozinho** quando uma demanda sua entra em *Em andamento* (até 15 min depois), contando da hora
+  em que ela entrou. PR, Deploy, Validação e Impedido não contam como andamento.
+- **▶** numa demanda em andamento começa o cronômetro nela. Se outra estava rodando, ela é pausada e
+  o tempo dela é apontado antes.
+- **⏸ Pausar e apontar** registra no Jira o tempo até agora (abaixo de 1 minuto não aponta nada).
+  **Desfazer** apaga esse apontamento nos 30 segundos seguintes.
+- Se a demanda que está rodando **sai de Em andamento** (foi para PR, por exemplo), o cronômetro para
+  e aponta até a hora da mudança.
+- **✕** descarta sem apontar. O que você pausou ou descartou não volta a começar sozinho no mesmo dia.
+- O cronômetro é um só para todas as abas do Jira e continua rodando se você fechar a página.
+
+A barra de baixo tem **Demanda**, **Foco** (todas as suas demandas abertas, com ▶ para começar) e **Deploy**.
 
 ## Voltar de onde parou (3.11)
 

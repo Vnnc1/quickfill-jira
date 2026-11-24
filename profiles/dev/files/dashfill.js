@@ -1,6 +1,6 @@
 /* DashFill DEV: o quadro continua sendo do Jira (navegação, cliques e arraste).
- * Por cima dele: a lateral "Meu dia", a barra de baixo com o contexto da demanda e os modos de trabalho
- * do DEV (Foco, PRs, Retornos do QA e Deploy). */
+ * Por cima dele: a lateral "Meu dia" (com o cronômetro da demanda em andamento), a barra de baixo com o
+ * contexto da demanda e os modos de trabalho do DEV (Foco e Deploy). */
 (async () => {
   if (document.getElementById('quickfill-dev-dashfill')) return;
   const url = (file) => chrome.runtime.getURL(file);
@@ -9,11 +9,13 @@
     { developmentDetails, branchCommands, isDevelopmentField },
     { renderHistory },
     { loadAccent },
+    { clockText, autoStartCandidate, addSkip, worklogFor, isDoingStatus, enteredStatusAt },
   ] = await Promise.all([
     import(url('lib/board-rules.js')),
     import(url('lib/dashfill-development.js')),
     import(url('lib/history-view.js')),
     import(url('lib/theme.js')),
+    import(url('lib/focus-timer.js')),
   ]);
 
   /* ================================================================ */
@@ -51,12 +53,21 @@
     [data-qf-sel]{outline:2px solid rgba(87,157,255,.9)!important;outline-offset:-2px;border-radius:6px}
     [data-qf-dim]{opacity:.32;transition:opacity .2s}
     [data-qf-dim]:hover{opacity:.8}
-    .qf-card-actions{position:relative;z-index:1;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;margin:4px 0 0 auto;width:fit-content;max-width:100%}
-    .qf-card-action{box-sizing:border-box;max-width:100%;border:1px solid #467060;border-radius:5px;padding:3px 8px;background:#20382e;color:#b6f1d5;font:600 11px/1.5 -apple-system,'Segoe UI',sans-serif;cursor:pointer;transition:background .15s,color .15s}
-    .qf-card-action[hidden]{display:none!important}
-    .qf-card-action:hover,.qf-card-action:focus-visible{background:#4bce97;color:#102018}
-    .qf-card-action:focus-visible{outline:2px solid currentColor;outline-offset:2px}
-    @media(prefers-reduced-motion:reduce){.qf-card-action{transition:none}}`;
+    [data-qf-card]{position:relative}
+    /* Ações do DashFill: dentro do próprio card, na lateral direita, só ao passar o mouse (ou com o teclado).
+       Ficam por cima do card, sem mudar a altura dele nem invadir os cards vizinhos. */
+    .qf-card-actions{position:absolute;z-index:3;top:50%;right:6px;display:flex;flex-direction:column;gap:5px;padding:4px;border-radius:999px;background:rgba(22,26,29,.72);backdrop-filter:blur(3px);box-shadow:0 4px 14px rgba(0,0,0,.35);opacity:0;pointer-events:none;transform:translate(8px,-50%);transition:opacity .16s ease,transform .18s cubic-bezier(.2,.8,.2,1)}
+    [data-qf-card]:hover>.qf-card-actions,.qf-card-actions:focus-within{opacity:1;pointer-events:auto;transform:translate(0,-50%)}
+    .qf-card-action{box-sizing:border-box;width:26px;height:26px;display:grid;place-items:center;padding:0;border-radius:50%;border:1px solid #467060;background:#1d2a24;color:#b6f1d5;cursor:pointer;transition:background .15s,color .15s,transform .15s,border-color .15s}
+    .qf-card-action svg{width:14px;height:14px;display:block}
+    .qf-card-action:hover,.qf-card-action:focus-visible{background:#4bce97;border-color:#4bce97;color:#102018;transform:scale(1.08)}
+    .qf-card-action:focus-visible{outline:2px solid #4bce97;outline-offset:2px}
+    .qf-card-action[aria-pressed="true"]{background:#4bce97;border-color:#4bce97;color:#102018}
+    /* Na lista do deploy: o ⇪ fica à vista mesmo sem o mouse, para mostrar que o card está na lista. */
+    [data-qf-deploy]>.qf-card-actions{opacity:1;pointer-events:auto;transform:translate(0,-50%);background:transparent;box-shadow:none;backdrop-filter:none}
+    [data-qf-deploy]:not(:hover)>.qf-card-actions:not(:focus-within) .qf-open{opacity:0;pointer-events:none}
+    [data-qf-deploy]:hover>.qf-card-actions{background:rgba(22,26,29,.72);box-shadow:0 4px 14px rgba(0,0,0,.35)}
+    @media(prefers-reduced-motion:reduce){.qf-card-actions,.qf-card-action{transition:none}}`;
   document.head.append(pageCss);
 
   const $ = (s) => root.querySelector(s);
@@ -212,19 +223,17 @@
   /* ================================================================ */
   /* Estado                                                            */
   /* ================================================================ */
-  const PREF = 'qf.dev.dashfill.active', DEPLOY = 'qf.dev.dashfill.deploy', SIZE = 'qf.dev.dashfill.size', FOCUS = 'qf.dev.dashfill.focus';
+  const PREF = 'qf.dev.dashfill.active', DEPLOY = 'qf.dev.dashfill.deploy', SIZE = 'qf.dev.dashfill.size', FOCUS = 'qf.dev.dashfill.focus', SKIP = 'qf.dev.dashfill.focus.skip';
   const MODES = [
     ['issue', 'Demanda', 'O contexto da demanda escolhida no quadro'],
-    ['focus', 'Foco', 'Só o que é seu, com cronômetro para apontar'],
-    ['prs', 'PRs', 'Pull requests do quadro: revisão, aprovação e merge'],
-    ['returns', 'Retornos', 'O que voltou do QA ou do deploy nos últimos 14 dias'],
+    ['focus', 'Foco', 'Só o que é seu, com o cronômetro do Meu dia'],
     ['deploy', 'Deploy', 'Lista de demandas para subir juntas'],
   ];
   const TABS = [['resumo', 'Resumo'], ['git', 'Branches e SQL'], ['envs', 'ENVs'], ['docs', 'Docs e Figma'], ['comments', 'Comentários'], ['history', 'Histórico']];
   const SIZES = { s: 230, m: 360, l: Math.round(innerHeight * 0.58) };
   let active = false, expandedDay = false, folded = true, view = 'issue', tab = 'resumo', size = 'm';
   let key = '', current = null, colView = null, route = '', refreshedAt = 0, confirmBox = null;
-  let seq = 0, daySeq = 0, sessionOn = false, deployList = [], focus = null, myKeys = null;
+  let seq = 0, daySeq = 0, sessionOn = false, deployList = [], focus = null, myKeys = null, skip = null;
   const reserved = new Map();
   let dialogOpen = false;
   try {
@@ -233,11 +242,15 @@
     deployList = JSON.parse(sessionStorage.getItem(DEPLOY) || '[]').filter(validKey);
     size = localStorage.getItem(SIZE) || 'm';
     focus = JSON.parse(localStorage.getItem(FOCUS) || 'null');
+    skip = JSON.parse(localStorage.getItem(SKIP) || 'null');
   } catch { /* sem storage */ }
   const applySize = (px) => host.style.setProperty('--dock-h', (px || SIZES[size] || 360) + 'px');
   applySize();
   const saveDeploy = () => { try { sessionStorage.setItem(DEPLOY, JSON.stringify(deployList)); } catch { /* sem storage */ } };
   const saveFocus = () => { try { localStorage.setItem(FOCUS, JSON.stringify(focus)); } catch { /* sem storage */ } };
+  const saveSkip = () => { try { localStorage.setItem(SKIP, JSON.stringify(skip)); } catch { /* sem storage */ } };
+  // O cronômetro é um só para todas as abas do Jira: sempre lê o que está gravado antes de mexer.
+  const storedFocus = () => { try { return JSON.parse(localStorage.getItem(FOCUS) || 'null'); } catch { return focus; } };
   const drafts = new Map(), posting = new Set(), cache = new Map();
 
   /* ================================================================ */
@@ -327,6 +340,8 @@
   const boardProjects = () => [...new Set([...cardNodes().keys()].map((k) => k.split('-')[0]))];
   const isPrCol = (name) => /^(pr|pull request|feito|done|code review|revis)/i.test(name);
 
+  const ICON_OPEN = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+  const ICON_DEPLOY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.5M4 7.5l4-4 4 4M3.5 13h9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const cardButtons = new Map();
   function paintCards() {
     const cards = active ? cardNodes() : new Map();
@@ -336,6 +351,7 @@
       node.removeAttribute('data-qf-sel');
       node.removeAttribute('data-qf-dim');
       node.removeAttribute('data-qf-deploy');
+      node.removeAttribute('data-qf-card');
       cardButtons.delete(node);
     }
     for (const [k, node] of cards) {
@@ -343,13 +359,14 @@
       node.toggleAttribute('data-qf-sel', k === key && view === 'issue');
       node.toggleAttribute('data-qf-dim', view === 'focus' && !!myKeys && !myKeys.has(k));
       node.toggleAttribute('data-qf-deploy', listed);
+      node.setAttribute('data-qf-card', '');
       let actions = cardButtons.get(node);
       if (!actions) {
         actions = document.createElement('div');
         actions.className = 'qf-card-actions';
         actions.dataset.key = k;
-        actions.innerHTML = '<button type="button" class="qf-card-action">DashFill</button><button type="button" class="qf-card-action" data-deploy hidden></button>';
-        actions.firstElementChild.setAttribute('aria-label', 'DashFill · ' + k);
+        actions.innerHTML = `<button type="button" class="qf-card-action qf-open" title="Abrir no DashFill">${ICON_OPEN}</button><button type="button" class="qf-card-action qf-dep" data-deploy>${ICON_DEPLOY}</button>`;
+        actions.firstElementChild.setAttribute('aria-label', 'Abrir ' + k + ' no DashFill');
         for (const type of ['pointerdown', 'mousedown', 'keydown', 'keyup']) actions.addEventListener(type, e => e.stopPropagation());
         actions.onclick = e => {
           const button = e.target.closest('button');
@@ -365,11 +382,11 @@
         cardButtons.set(node, actions);
       }
       const deployButton = actions.lastElementChild;
-      deployButton.hidden = view !== 'deploy';
-      const label = listed ? 'Retirar do deploy' : '+ Deploy';
-      if (deployButton.textContent !== label) {
-        deployButton.textContent = label;
+      const label = listed ? 'Tirar do deploy' : 'Colocar no deploy';
+      if (deployButton.title !== label) {
+        deployButton.title = label;
         deployButton.setAttribute('aria-label', label + ' · ' + k);
+        deployButton.setAttribute('aria-pressed', String(listed));
       }
     }
   }
@@ -470,48 +487,102 @@
   /* ================================================================ */
   /* Lateral: Meu dia                                                  */
   /* ================================================================ */
-  let doingNow = [];
+  let doingNow = [], dayData = null, dayMsg = null;
   const dayHead = () => `<div class="d-h"><span class="mark">QF</span><b>Meu dia</b><small>${new Date().toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })}</small><button class="ic sm" data-action="day-refresh" aria-label="Atualizar meu dia" title="Atualizar">↻</button></div>`;
+  const hhmm = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   async function refreshDay() {
     if (!active || expandedDay) return;
     const s = ++daySeq;
     refreshedAt = Date.now();
-    if (!day.querySelector('.goal')) day.innerHTML = dayHead() + note('Consultando a meta…');
+    if (!dayData) day.innerHTML = dayHead() + note('Consultando a meta…');
     try {
       const [rep, doing] = await Promise.all([
         send('DAY_REPORT', { days: 10 }),
-        jql('assignee = currentUser() AND statusCategory = "In Progress" ORDER BY updated DESC', ['summary', 'status'], 3).catch(() => []),
+        // A categoria "Em andamento" também traz PR, Deploy e Validação: filtra pelo status de desenvolvimento.
+        jql('assignee = currentUser() AND statusCategory = "In Progress" ORDER BY updated DESC', ['summary', 'status'], 12, { expand: 'changelog' }).catch(() => []),
       ]);
-      doingNow = doing.map((i) => ({ key: i.key, summary: i.fields?.summary || '', status: i.fields?.status?.name || '' }));
       if (s !== daySeq || !active || expandedDay) return;
-      const m = timelineMetrics(rep), done = m.total >= m.goal, wd = rep.workday, width = wd.end - wd.start;
-      const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
-      const seg = (rep.entries || []).map((e) => {
-        const a = Math.max(wd.start, e.start), b = Math.min(wd.end, e.end);
-        if (b <= a || width <= 0) return '';
-        return `<i class="${e.key === doingNow[0]?.key ? 'cur' : ''}" style="left:${(100 * (a - wd.start)) / width}%;width:${(100 * (b - a)) / width}%" title="${esc(e.key)} · ${formatHM(e.start)}–${formatHM(e.end)}"></i>`;
-      }).join('');
-      const nowPct = nowMin > wd.start && nowMin < wd.end ? (100 * (nowMin - wd.start)) / width : -1;
-      const pct = Math.min(100, Math.round(m.percent));
-      const running = focus ? `<button class="now run" data-key="${esc(focus.key)}"><span class="k">${esc(focus.key)}</span><span class="t">Foco: ${esc(formatMinutes(Math.max(1, Math.round((Date.now() - focus.start) / 60000))))}</span></button>` : '';
-      const doingHtml = doingNow.slice(0, 2).map((d) => `<button class="now" data-key="${esc(d.key)}" title="${esc(d.key)} · ${esc(d.summary)}"><span class="k">${esc(d.key)}</span><span class="t">${esc(d.summary)}</span></button>`).join('');
-      day.innerHTML = dayHead() + `
-        <div class="goal">
-          <span class="df-ring" style="--p:${pct}" role="img" aria-label="${esc(formatMinutes(m.total))} apontadas de ${esc(formatMinutes(m.goal))}"><span class="ring-v"><b>${esc(formatMinutes(m.total))}</b><small>${pct}%</small></span></span>
-          <div class="goal-t"><b class="${done ? 'met' : ''}">${done ? 'Meta batida' : 'Faltam ' + esc(formatMinutes(m.goal - m.total))}</b><small>meta de ${esc(formatMinutes(m.goal))}</small></div>
-        </div>
-        <div class="tl" aria-label="Linha do tempo de hoje">${seg}${nowPct >= 0 ? `<em style="left:${nowPct}%"></em>` : ''}</div>
-        <div class="tl-h"><span>${formatHM(wd.start)}</span><span>${formatHM(wd.end)}</span></div>
-        ${running}
-        ${doingHtml ? `<div class="sub">Em andamento</div>${doingHtml}` : '<div class="sub">Nada em andamento no seu nome</div>'}
-        <div class="quick">
-          <button data-mode="focus">Foco</button><button data-mode="prs">PRs</button><button data-mode="returns">Retornos</button>
-          <button data-mode="deploy" class="dq">Deploy <b>${deployList.length}</b></button>
-        </div>
-        <button class="lnk" data-action="day" aria-expanded="false">Abrir meu dia completo ›</button>`;
+      doingNow = doing.filter((i) => isDoingStatus(i.fields?.status?.name, i.fields?.status?.statusCategory?.key))
+        .map((i) => ({ key: i.key, summary: i.fields?.summary || '', status: i.fields?.status?.name || '', enteredAt: enteredStatusAt(i.changelog?.histories) }))
+        .sort((a, b) => (b.enteredAt || 0) - (a.enteredAt || 0));
+      dayData = { rep };
+      await followDoing();
+      paintDay();
     } catch (e) {
       if (s === daySeq && active && !expandedDay) day.innerHTML = dayHead() + note(e.message);
     }
+  }
+  /* O cronômetro acompanha o quadro: começa sozinho quando uma demanda sua entra em andamento
+   * e, se a demanda que está rodando sair de andamento, para e aponta até aquele momento. */
+  async function followDoing() {
+    focus = storedFocus();
+    if (focus?.doing && !doingNow.some((d) => d.key === focus.key)) {
+      const t = focus;
+      const iss = await api(`issue/${t.key}?fields=status&expand=changelog`).catch(() => null);
+      const f = iss?.fields;
+      if (f && !isDoingStatus(f.status?.name, f.status?.statusCategory?.key)) {
+        const leftAt = enteredStatusAt(iss.changelog?.histories);
+        await pauseTimer({ end: leftAt > t.start ? Math.min(leftAt, Date.now()) : Date.now(), why: `Foi para ${f.status?.name || 'outro status'}` });
+      }
+    }
+    const cand = autoStartCandidate(doingNow, storedFocus(), skip);
+    if (cand) {
+      focus = { ...cand, doing: true };
+      saveFocus();
+      showMsg(`Cronômetro iniciado: ${cand.key} entrou em andamento às ${hhmm(cand.start)}.`);
+      if (view === 'focus') renderFocus();
+      drawBar();
+    }
+  }
+  function timerCard() {
+    if (!focus) return '';
+    return `<div class="tmr" role="group" aria-label="Cronômetro de ${esc(focus.key)}">
+      <div class="tmr-h"><i class="rec" aria-hidden="true"></i><small>${focus.auto ? 'Começou sozinho' : 'Em foco'} · desde ${esc(hhmm(focus.start))}</small></div>
+      <button class="lnk tmr-k" data-key="${esc(focus.key)}" title="Abrir ${esc(focus.key)} na barra"><span class="k">${esc(focus.key)}</span><span class="tmr-t">${esc(focus.title || '')}</span></button>
+      <b class="clock" data-since="${focus.start}" aria-live="off">${esc(clockText(focus.start))}</b>
+      <div class="tmr-a"><button class="btn sm pri" data-pause title="Para o cronômetro e aponta no Jira o tempo até agora">⏸ Pausar e apontar</button><button class="ic sm" data-discard title="Descartar sem apontar" aria-label="Descartar o cronômetro sem apontar">✕</button></div>
+    </div>`;
+  }
+  function paintDay() {
+    if (!active || expandedDay || !dayData) return;
+    const rep = dayData.rep;
+    const m = timelineMetrics(rep), done = m.total >= m.goal, wd = rep.workday, width = wd.end - wd.start;
+    const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
+    const seg = (rep.entries || []).map((e) => {
+      const a = Math.max(wd.start, e.start), b = Math.min(wd.end, e.end);
+      if (b <= a || width <= 0) return '';
+      return `<i class="${e.key === focus?.key ? 'cur' : ''}" style="left:${(100 * (a - wd.start)) / width}%;width:${(100 * (b - a)) / width}%" title="${esc(e.key)} · ${formatHM(e.start)}–${formatHM(e.end)}"></i>`;
+    }).join('');
+    const nowPct = nowMin > wd.start && nowMin < wd.end ? (100 * (nowMin - wd.start)) / width : -1;
+    const pct = Math.min(100, Math.round(m.percent));
+    const rows = doingNow.slice(0, 4).map((d) => {
+      const on = focus?.key === d.key;
+      return `<div class="now-r ${on ? 'on' : ''}"><button class="now" data-key="${esc(d.key)}" title="${esc(d.key)} · ${esc(d.summary)}"><span class="k">${esc(d.key)}</span><span class="t">${esc(d.summary)}</span></button>${on
+        ? `<button class="play on" data-pause aria-label="Pausar e apontar ${esc(d.key)}" title="Pausar e apontar">⏸</button>`
+        : `<button class="play" data-play="${esc(d.key)}" data-title="${esc(d.summary)}" data-doing="1" aria-label="Iniciar o cronômetro em ${esc(d.key)}" title="${focus ? `Pausa ${esc(focus.key)} (aponta) e começa aqui` : 'Iniciar o cronômetro'}">▶</button>`}</div>`;
+    }).join('');
+    day.innerHTML = dayHead() + `
+      <div class="goal">
+        <span class="df-ring" style="--p:${pct}" role="img" aria-label="${esc(formatMinutes(m.total))} apontadas de ${esc(formatMinutes(m.goal))}"><span class="ring-v"><b>${esc(formatMinutes(m.total))}</b><small>${pct}%</small></span></span>
+        <div class="goal-t"><b class="${done ? 'met' : ''}">${done ? 'Meta batida' : 'Faltam ' + esc(formatMinutes(m.goal - m.total))}</b><small>meta de ${esc(formatMinutes(m.goal))}</small></div>
+      </div>
+      <div class="tl" aria-label="Linha do tempo de hoje">${seg}${nowPct >= 0 ? `<em style="left:${nowPct}%"></em>` : ''}</div>
+      <div class="tl-h"><span>${formatHM(wd.start)}</span><span>${formatHM(wd.end)}</span></div>
+      ${timerCard()}
+      ${dayMsg ? `<div class="d-msg ${dayMsg.cls || ''}" role="status"><span>${esc(dayMsg.text)}</span>${dayMsg.undo ? '<button class="lnk" data-undo>Desfazer</button>' : ''}</div>` : ''}
+      ${rows ? `<div class="sub">Em andamento</div>${rows}` : '<div class="sub">Nada em andamento no seu nome</div>'}
+      <div class="quick">
+        <button data-mode="focus">Foco</button>
+        <button data-mode="deploy" class="dq">Deploy <b>${deployList.length}</b></button>
+      </div>
+      <button class="lnk" data-action="day" aria-expanded="false">Abrir meu dia completo ›</button>`;
+  }
+  let msgTimer = 0;
+  function showMsg(text, cls = '', undo = false) {
+    dayMsg = { text, cls, undo };
+    clearTimeout(msgTimer);
+    msgTimer = setTimeout(() => { dayMsg = null; lastLog = undo ? null : lastLog; paintDay(); }, undo ? 30000 : 12000);
+    paintDay();
   }
   async function setDay(open) {
     expandedDay = open; daySeq++;
@@ -545,7 +616,7 @@
     if (view === 'issue') {
       whoEl.innerHTML = key
         ? `<span class="k">${esc(key)}</span>${current ? `<span class="pill ${statusTone(current.cat, current.status)}">${esc(current.status)}</span><b class="ttl" title="${esc(current.summary)}">${esc(current.summary)}</b>` : '<span class="hint">carregando…</span>'}`
-        : '<span class="hint">Selecione <b>DashFill</b> em um card do quadro.</span>';
+        : '<span class="hint">Passe o mouse em um card do quadro e clique em <b>+</b>.</span>';
       tabsEl.hidden = !key || folded;
       tabsEl.innerHTML = TABS.map(([id, l]) => {
         const n = !current ? '' : id === 'envs' ? current.envs.length : id === 'git' ? current.branches.length + current.sql.length + current.dev.prs.length : id === 'docs' ? current.links.figma.length + current.links.confluence.length + current.links.other.length + (current.f.issuelinks || []).length : id === 'comments' ? current.comments : '';
@@ -587,15 +658,13 @@
     if (view === 'issue') return renderIssue();
     if (view === 'column') return renderColumn();
     if (view === 'focus') return renderFocus();
-    if (view === 'prs') return renderPrs();
-    if (view === 'returns') return renderReturns();
     if (view === 'deploy') return renderDeploy();
   }
 
   /* ---------------- Demanda ---------------- */
   function renderIssue() {
     if (!key) {
-      body.innerHTML = `<div class="empty"><b>Escolha uma demanda no quadro</b><p>Selecione o botão <b>DashFill</b> no card para ler a descrição, consultar branches e ver os comentários.</p></div>`;
+      body.innerHTML = `<div class="empty"><b>Escolha uma demanda no quadro</b><p>Passe o mouse no card e clique em <b>+</b> para ler a descrição, consultar branches e ver os comentários.</p></div>`;
       return;
     }
     if (!current) return;
@@ -605,7 +674,9 @@
       const due = f.duedate ? new Date(f.duedate + 'T12:00') : null, late = due && due < new Date() && d.cat !== 'done';
       const comment = (f.comment?.comments || []).at(-1);
       body.innerHTML = `<div class="summary-tools">
-        <button class="btn pri" data-focus="${esc(d.key)}">${focus?.key === d.key ? 'Ver foco atual' : 'Iniciar foco'}</button>
+        ${focus?.key === d.key
+          ? '<button class="btn pri" data-pause title="Para o cronômetro e aponta o tempo até agora">⏸ Pausar e apontar</button>'
+          : `<button class="btn pri" data-play="${esc(d.key)}" data-title="${esc(d.summary)}" data-doing="${isDoingStatus(d.status, d.cat) ? '1' : ''}">▶ Iniciar cronômetro</button>`}
         <button class="btn" data-toggle-deploy="${esc(d.key)}">${deployList.includes(d.key) ? 'Retirar do deploy' : 'Adicionar ao deploy'}</button>
         <a class="btn" href="/browse/${esc(d.key)}" target="_blank" rel="noopener">Abrir no Jira ↗</a>
         <button class="btn" data-copy="${esc(d.key)} — ${esc(d.summary)}">Copiar chave e título</button>
@@ -793,12 +864,11 @@
       myKeys = new Set(mine.map((i) => i.key));
       paintCards();
       const doing = mine.filter((i) => i.fields?.status?.statusCategory?.key === 'indeterminate' && !/impedid|aguard|bloque/i.test(i.fields?.status?.name || ''));
-      const el = focus ? Math.max(1, Math.round((Date.now() - focus.start) / 60000)) : 0;
       body.innerHTML = `<div class="focus">
         <section class="f-now">
-          ${focus ? `<div class="timer"><small>Em foco desde ${esc(new Date(focus.start).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))}</small><b class="clock" data-since="${focus.start}">${esc(formatMinutes(el))}</b><button class="lnk k" data-key="${esc(focus.key)}">${esc(focus.key)}</button><span class="f-t">${esc(focus.title || '')}</span>
-            <div class="row gap"><button class="btn sm pri" data-action="focus-stop">Parar e apontar</button><button class="btn sm" data-action="focus-cancel">Descartar</button></div>${confirmBox ? `<div class="confirm">${confirmBox}</div>` : ''}</div>`
-            : `<div class="timer idle"><b>Escolha no que focar</b><p>O quadro apaga o que não é seu. O cronômetro roda mesmo fechando o Jira e, ao parar, você aponta o tempo na demanda com um clique.</p></div>`}
+          ${focus ? `<div class="timer"><small>${focus.auto ? 'Começou sozinho' : 'Em foco'} desde ${esc(hhmm(focus.start))}</small><b class="clock" data-since="${focus.start}">${esc(clockText(focus.start))}</b><button class="lnk k" data-key="${esc(focus.key)}">${esc(focus.key)}</button><span class="f-t">${esc(focus.title || '')}</span>
+            <div class="row gap"><button class="btn sm pri" data-pause>⏸ Pausar e apontar</button><button class="btn sm" data-discard>Descartar</button></div></div>`
+            : `<div class="timer idle"><b>Escolha no que focar</b><p>O cronômetro também roda no Meu dia e começa sozinho quando uma demanda sua entra em andamento. Ao pausar, o tempo até ali é apontado na demanda.</p></div>`}
           <div class="wip ${doing.length > 2 ? 'bad' : ''}"><b>${doing.length}</b><span>em andamento no seu nome${doing.length > 2 ? ' · acima do WIP de 2' : ''}</span></div>
         </section>
         <section class="f-list"><h3>Suas demandas abertas <span class="muted">${mine.length}</span></h3>
@@ -807,76 +877,67 @@
               <span class="pill ${statusTone(f.status?.statusCategory?.key, f.status?.name)}">${esc(f.status?.name)}</span>
               <span class="rw-tm ${late ? 'bad-t' : ''}">${due ? esc(due.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })) : '—'}</span>
               <span class="rw-tm">${esc(t.txt)}</span>
-              <button class="btn sm ${focus?.key === i.key ? 'pri' : ''}" data-focus="${esc(i.key)}" data-title="${esc(f.summary)}">${focus?.key === i.key ? 'Em foco' : 'Focar'}</button></div>`; }).join('') : '<div class="empty sm"><p>Nada aberto no seu nome neste quadro.</p></div>'}
+              ${focus?.key === i.key
+                ? '<button class="btn sm pri" data-pause title="Pausar e apontar">⏸ Pausar</button>'
+                : `<button class="btn sm" data-play="${esc(i.key)}" data-title="${esc(f.summary)}" data-doing="${isDoingStatus(f.status?.name, f.status?.statusCategory?.key) ? '1' : ''}" title="${focus ? `Pausa ${esc(focus.key)} (aponta) e começa aqui` : 'Iniciar o cronômetro'}">▶ Focar</button>`}</div>`; }).join('') : '<div class="empty sm"><p>Nada aberto no seu nome neste quadro.</p></div>'}
         </section></div>`;
     } catch (e) { if (s === seq) body.innerHTML = note(e.message, 'err'); }
   }
-  function startFocus(k, title) {
-    focus = { key: k, title: title || cache.get(k)?.data?.summary || '', start: Date.now() };
-    saveFocus(); confirmBox = null;
-    if (view === 'focus') renderFocus(); else { drawBar(); render(); }
-    refreshDay();
+  /* Cronômetro: começar (pausando e apontando o que estava rodando), pausar e apontar, descartar e desfazer. */
+  let lastLog = null, timerBusy = false;
+  const redrawTimer = () => { paintDay(); drawBar(); if (view === 'focus') renderFocus(); };
+  async function startTimer(k, title, doing = false) {
+    if (!validKey(k) || timerBusy) return;
+    if (storedFocus()?.key === k) return;
+    if (storedFocus()) await pauseTimer({ why: 'Trocou de demanda' });
+    focus = { key: k, title: title || cache.get(k)?.data?.summary || doingNow.find((d) => d.key === k)?.summary || '', start: Date.now(), doing: !!doing };
+    saveFocus();
+    redrawTimer();
   }
-  const jiraStarted = (ms) => { const d = new Date(ms), z = -d.getTimezoneOffset(), p = (n) => String(Math.abs(n)).padStart(2, '0');
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:00.000${z >= 0 ? '+' : '-'}${p(Math.floor(Math.abs(z) / 60))}${p(Math.abs(z) % 60)}`; };
-
-  /* ---------------- Modo PRs ---------------- */
-  async function renderPrs() {
-    const s = ++seq;
-    body.innerHTML = skeleton();
-    const cols = columns().filter((c) => !/pendente|backlog|to do|a fazer/i.test(c.name));
-    const keys = [...new Set(cols.flatMap((c) => c.keys))].slice(0, 30);
-    const colOf = Object.fromEntries(cols.flatMap((c) => c.keys.map((k) => [k, c.name])));
-    const rows = (await mapLimit(keys, 4, (k) => issueData(k))).filter((r) => r && !r.error);
-    if (s !== seq || view !== 'prs') return;
-    const items = rows.flatMap((r) => r.dev.prs.map((p) => ({ r, p, ok: p.reviewers.filter((x) => x.ok).length })));
-    const groups = [
-      ['Esperando revisão', 'warn', items.filter((x) => x.p.state === 'OPEN' && !x.ok), 'PRs abertos sem nenhuma aprovação'],
-      ['Aprovados, falta o merge', 'data', items.filter((x) => x.p.state === 'OPEN' && x.ok), 'Já aprovados: dá para fazer o merge'],
-      ['Merged, mas o card não avançou', 'ok', items.filter((x) => x.p.state === 'MERGED' && /andamento|progress|desenvolv/i.test(x.r.status)), 'O código entrou e o card ainda está em andamento'],
-    ];
-    const noPr = rows.filter((r) => !r.dev.prs.length && /andamento|progress|feito|pr\b|review/i.test(r.status));
-    body.innerHTML = `<div class="list-h"><b>${items.length} ${items.length === 1 ? 'PR' : 'PRs'} em ${rows.length} ${rows.length === 1 ? 'card' : 'cards'} do quadro</b><span class="muted">olhando as colunas depois de Itens Pendentes (até 30 cards)</span></div>
-      <div class="groups">${groups.map(([t, tone, list, tip]) => `<section class="grp ${tone}"><h3>${t} <span class="muted">${list.length}</span></h3><p class="muted small">${tip}</p>
-        ${list.length ? list.map((x) => `<div class="rw"><button class="rw-main" data-key="${esc(x.r.key)}"><span class="k">${esc(x.r.key)}</span><span class="rw-t">${esc(x.p.title)}</span></button>
-          <span class="rw-tm">${esc(colOf[x.r.key] || x.r.status)}</span>
-          <span class="revs">${x.p.reviewers.map((v) => `<span class="rev ${v.ok ? 'ok' : ''}" title="${esc(v.name)}">${esc(initials(v.name))}</span>`).join('') || '<span class="muted small">sem revisor</span>'}</span>
-          <span class="rw-tm">${esc(ago(x.p.at))}</span>${x.p.url ? `<a class="btn sm" href="${esc(x.p.url)}" target="_blank" rel="noopener">PR ↗</a>` : ''}</div>`).join('') : '<p class="note">Nenhum.</p>'}</section>`).join('')}
-        <section class="grp muted"><h3>Em andamento sem PR <span class="muted">${noPr.length}</span></h3><p class="muted small">Pode faltar abrir o PR</p>${noPr.length ? noPr.map((r) => rowHtml(r)).join('') : '<p class="note">Nenhum.</p>'}</section>
-      </div>`;
-  }
-
-  /* ---------------- Modo Retornos ---------------- */
-  async function renderReturns() {
-    const s = ++seq;
-    body.innerHTML = skeleton();
+  async function pauseTimer({ end = Date.now(), why = '' } = {}) {
+    const t = storedFocus();
+    if (!t || timerBusy) return;
+    timerBusy = true;
+    // Libera o cronômetro antes de apontar: outra aba do Jira não aponta o mesmo trecho de novo.
+    focus = null; saveFocus();
+    skip = addSkip(skip, t.key); saveSkip();
+    const log = worklogFor(t, end);
     try {
-      const projects = boardProjects();
-      if (!projects.length) { body.innerHTML = note('Nenhum card no quadro para saber o espaço.'); return; }
-      const issues = await jql(`project in (${projects.join(',')}) AND updated >= -14d ORDER BY updated DESC`, ['summary', 'status', 'assignee', 'comment'], 80, { expand: 'changelog' });
-      if (s !== seq || view !== 'returns') return;
-      const ahead = /valida|homolog|deploy|qa\b|teste|feito|pr\b|review|done/i, behind = /reabert|andamento|progress|pendente|a fazer|to do|impedid/i;
-      const rows = [];
-      for (const i of issues) {
-        const tr = (i.changelog?.histories || []).flatMap((h) => (h.items || []).filter((x) => x.field === 'status').map((x) => ({ at: h.created, by: h.author?.displayName || '', from: x.fromString || '', to: x.toString || '' })));
-        const back = tr.filter((t) => ahead.test(t.from) && behind.test(t.to) && Date.now() - Date.parse(t.at) < 14 * 864e5).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
-        if (!back.length) continue;
-        const last = back[0];
-        const comments = (i.fields?.comment?.comments || []).filter((c) => Date.parse(c.created) >= Date.parse(last.at) - 6 * 36e5).slice(-1)[0];
-        rows.push({ i, last, n: back.length, comment: comments, mine: !!i.fields?.assignee && myKeysHas(i) });
-      }
-      rows.sort((a, b) => Number(b.mine) - Number(a.mine) || Date.parse(b.last.at) - Date.parse(a.last.at));
-      body.innerHTML = `<div class="list-h"><b>${rows.length} ${rows.length === 1 ? 'demanda voltou' : 'demandas voltaram'} nos últimos 14 dias</b><span class="muted">de Validação, Deploy ou Feito para trás · as suas primeiro</span></div>
-        <div class="rets">${rows.length ? rows.map((x) => `<article class="ret ${x.mine ? 'mine' : ''}">
-          <div class="row"><button class="lnk k" data-key="${esc(x.i.key)}">${esc(x.i.key)}</button><b class="ret-t">${esc(x.i.fields?.summary)}</b>${x.n > 1 ? `<span class="pill err">voltou ${x.n}×</span>` : ''}</div>
-          <div class="flow small"><span class="pill muted">${esc(x.last.from)}</span><span class="arr">→</span><span class="pill warn">${esc(x.last.to)}</span><span class="muted">por ${esc(x.last.by)} · ${esc(ago(x.last.at))}</span></div>
-          ${x.comment ? `<div class="ret-cm">${avatar(x.comment.author?.displayName || '')}<div class="rich">${adf(x.comment.body)}</div></div>` : '<p class="note">Sem comentário junto do retorno. Vale pedir o motivo ao QA.</p>'}
-          <div class="row gap"><button class="btn sm" data-key="${esc(x.i.key)}" data-open-tab="comments">Responder</button><button class="btn sm" data-focus="${esc(x.i.key)}" data-title="${esc(x.i.fields?.summary)}">Focar</button></div>
-        </article>`).join('') : '<div class="empty"><b>Nada voltou nos últimos 14 dias</b><p>Quando uma demanda sair de Validação, Deploy ou Feito para trás, ela aparece aqui com o comentário do QA.</p></div>'}</div>`;
-    } catch (e) { if (s === seq) body.innerHTML = note(e.message, 'err'); }
+      if (!log) { showMsg(`${why ? why + ': menos' : 'Menos'} de 1 minuto em ${t.key}, nada apontado.`); return; }
+      const res = await api(`issue/${t.key}/worklog?adjustEstimate=auto`, { method: 'POST', body: JSON.stringify(log.body) });
+      lastLog = { key: t.key, id: res?.id, timer: t };
+      cache.delete(t.key);
+      showMsg(`${why ? why + ': apontado' : 'Apontado'} ${formatMinutes(log.minutes)} em ${t.key} (${hhmm(t.start)}–${hhmm(Math.min(end, t.start + log.minutes * 60000))}).`, 'ok', !!res?.id);
+      refreshedAt = 0;   // a meta do dia muda: relê na próxima volta
+    } catch (err) {
+      focus = t; saveFocus();
+      showMsg(`Não deu para apontar em ${t.key}: ${err.message} O cronômetro continua rodando.`, 'err');
+    } finally {
+      timerBusy = false;
+      redrawTimer();
+    }
   }
-  let meId = null;
-  const myKeysHas = (i) => (meId ? i.fields.assignee.accountId === meId : false);
+  function discardTimer() {
+    const t = storedFocus();
+    if (!t) return;
+    focus = null; saveFocus();
+    skip = addSkip(skip, t.key); saveSkip();
+    showMsg(`Cronômetro de ${t.key} descartado, nada apontado.`);
+    redrawTimer();
+  }
+  async function undoLog() {
+    const l = lastLog;
+    if (!l?.id) return;
+    lastLog = null;
+    try {
+      await api(`issue/${l.key}/worklog/${l.id}?adjustEstimate=auto`, { method: 'DELETE' });
+      cache.delete(l.key);
+      if (!storedFocus()) { focus = l.timer; saveFocus(); }   // volta a rodar de onde estava
+      showMsg(`Apontamento em ${l.key} desfeito${focus?.key === l.key ? '; o cronômetro voltou a rodar' : ''}.`);
+      refreshedAt = 0;
+    } catch (err) { showMsg(`Não deu para desfazer em ${l.key}: ${err.message}`, 'err'); }
+    redrawTimer();
+  }
 
   /* ---------------- Modo Deploy ---------------- */
   function toggleDeploy(k) {
@@ -889,7 +950,7 @@
   async function renderDeploy() {
     const s = ++seq;
     if (!deployList.length) {
-      body.innerHTML = `<div class="empty"><b>Monte a lista do deploy</b><p>Clique em <b>+ Deploy</b> no card, ou Shift+clique no card. O QuickFill junta branch e PR de cada demanda e prepara o comando, as notas e o card "Realizando Deploy".</p>
+      body.innerHTML = `<div class="empty"><b>Monte a lista do deploy</b><p>Passe o mouse no card e clique em <b>⇪</b>, ou Shift+clique no card. O QuickFill junta branch e PR de cada demanda e prepara o comando, as notas e o card "Realizando Deploy".</p>
         <button class="btn sm pri" data-action="add-feito">Adicionar tudo de Feito / PR</button></div>`;
       return;
     }
@@ -1035,27 +1096,13 @@
     else if (a === 'ask-move') askMove();
     else if (a === 'do-move') doMove();
     else if (a === 'cancel') { confirmBox = null; render(); }
-    else if (a === 'focus-stop') {
-      const min = Math.max(1, Math.round((Date.now() - focus.start) / 60000));
-      confirmBox = `<b>Apontar ${esc(formatMinutes(min))} em ${esc(focus.key)}?</b><p>De ${esc(new Date(focus.start).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))} até agora.</p><div class="row gap"><button class="btn sm pri" data-action="focus-log">Apontar no Jira</button><button class="btn sm" data-action="cancel">Continuar focando</button></div>`;
-      renderFocus();
-    }
-    else if (a === 'focus-log') {
-      const f = focus, min = Math.max(1, Math.round((Date.now() - f.start) / 60000));
-      try {
-        await api(`issue/${f.key}/worklog?adjustEstimate=auto`, { method: 'POST', body: JSON.stringify({ timeSpentSeconds: min * 60, started: jiraStarted(f.start) }) });
-        focus = null; saveFocus(); cache.delete(f.key);
-        confirmBox = null; renderFocus(); refreshDay(); drawBar();
-      } catch (err) { confirmBox = `<b>Não deu para apontar</b><p>${esc(err.message)}</p><button class="btn sm" data-action="cancel">Voltar</button>`; renderFocus(); }
-    }
-    else if (a === 'focus-cancel') { focus = null; saveFocus(); confirmBox = null; renderFocus(); refreshDay(); drawBar(); }
     if (b.dataset.tab) { body.scrollTop = 0; tab = b.dataset.tab; drawBar(); render(); tabsEl.querySelector('.on')?.focus({ preventScroll: true }); }
     if (b.dataset.copy !== undefined) copy(b.dataset.copy, b);
     if (b.dataset.toggleDeploy) toggleDeploy(b.dataset.toggleDeploy);
-    if (b.dataset.focus) {
-      if (focus?.key === b.dataset.focus) setView('focus');
-      else startFocus(b.dataset.focus, b.dataset.title);
-    }
+    if (b.dataset.play) { startTimer(b.dataset.play, b.dataset.title, b.dataset.doing === '1'); return; }
+    if (b.hasAttribute('data-pause')) { pauseTimer(); return; }
+    if (b.hasAttribute('data-discard')) { discardTimer(); return; }
+    if (b.hasAttribute('data-undo')) { undoLog(); return; }
     if (b.dataset.key) openIssue(b.dataset.key, false, b.dataset.openTab);
   });
 
@@ -1079,9 +1126,8 @@
     pageCss.disabled = !next;
     if (next) {
       drawBar(); geometry(); refreshDay(); paintCards();
-      api('myself').then((m) => { meId = m.accountId; }).catch(() => {});
     } else {
-      seq++; daySeq++;
+      seq++; daySeq++; dayData = null;
       key = ''; current = null; colView = null; expandedDay = false; folded = true; view = 'issue'; confirmBox = null; myKeys = null;
       day.classList.remove('expanded'); day.replaceChildren(); body.replaceChildren(); colBox.replaceChildren();
       releaseBoard(); paintCards();
@@ -1098,9 +1144,16 @@
   });
 
   function tick() {
-    const c = body.querySelector('.clock[data-since]');
-    if (c) c.textContent = formatMinutes(Math.max(1, Math.round((Date.now() - Number(c.dataset.since)) / 60000)));
+    for (const c of root.querySelectorAll('.clock[data-since]')) c.textContent = clockText(Number(c.dataset.since));
   }
+  setInterval(() => { if (active && !dialogOpen) tick(); }, 1000);
+  // Outra aba do Jira começou, pausou ou descartou o cronômetro: acompanha aqui.
+  addEventListener('storage', (e) => {
+    if (e.key !== FOCUS && e.key !== SKIP) return;
+    focus = storedFocus();
+    try { skip = JSON.parse(localStorage.getItem(SKIP) || 'null'); } catch { /* sem storage */ }
+    if (active) redrawTimer();
+  });
   function sync() {
     const path = location.pathname, allowed = boardRoute();
     if (path !== route || launch.hidden === allowed) {
