@@ -26,8 +26,19 @@ por cima do próprio card, sem mudar a altura dele; um card na lista do deploy d
   e aponta até a hora da mudança.
 - **✕** descarta sem apontar. O que você pausou ou descartou não volta a começar sozinho no mesmo dia.
 - O cronômetro é um só para todas as abas do Jira e continua rodando se você fechar a página.
+- No quadro, o card da demanda que está rodando ganha uma faixa embaixo com o **tempo correndo**, a
+  **data limite** (em vermelho se venceu) e o **tempo apontado contra a estimativa original**, contando o de
+  agora (quanto resta ou quanto passou). Se o cronômetro está numa subtarefa, a faixa aparece no card da
+  demanda-mãe, com a chave da subtarefa.
 
 A barra de baixo tem **Demanda**, **Foco** (todas as suas demandas abertas, com ▶ para começar) e **Deploy**.
+
+**Com o modal da demanda aberto** (clicando num card do quadro), o espaço vazio à esquerda do modal vira o
+**Meu dia da demanda**: a meta do dia, o cronômetro e a demanda com as subtarefas dela (ou as outras
+subtarefas, se você abriu uma subtarefa), cada uma com ▶ / ⏸ e quanto você apontou hoje. **⇥** expande o
+painel com o total de cada uma e as ações (deploy, copiar, abrir em nova aba); **⇤** recolhe. Clicar no
+painel não fecha o modal. Se não sobrar espaço ao lado do modal, fica só uma aba fina com o relógio, que
+abre o painel.
 
 ## Voltar de onde parou (3.11)
 

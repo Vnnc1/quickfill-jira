@@ -29,6 +29,7 @@
     <button class="launch" aria-pressed="false" hidden><span class="mark">QF</span><span>DashFill</span><span class="sw" aria-hidden="true"><i></i></span></button>
     <div class="colbtns"></div>
     <aside class="day" aria-label="Meu dia no QuickFill DEV" hidden></aside>
+    <aside class="mside" aria-label="QuickFill DEV: cronômetro da demanda aberta" hidden></aside>
     <section class="dock" aria-label="DashFill" hidden>
       <div class="grip" title="Arraste para mudar a altura" aria-hidden="true"></div>
       <header class="bar">
@@ -67,11 +68,26 @@
     [data-qf-deploy]>.qf-card-actions{opacity:1;pointer-events:auto;transform:translate(0,-50%);background:transparent;box-shadow:none;backdrop-filter:none}
     [data-qf-deploy]:not(:hover)>.qf-card-actions:not(:focus-within) .qf-open{opacity:0;pointer-events:none}
     [data-qf-deploy]:hover>.qf-card-actions{background:rgba(22,26,29,.72);box-shadow:0 4px 14px rgba(0,0,0,.35)}
-    @media(prefers-reduced-motion:reduce){.qf-card-actions,.qf-card-action{transition:none}}`;
+    @media(prefers-reduced-motion:reduce){.qf-card-actions,.qf-card-action{transition:none}}
+    /* Faixa "rodando agora" embaixo do card da demanda com o cronômetro ligado. */
+    .qf-run{display:flex;flex-wrap:wrap;align-items:center;gap:3px 8px;margin:8px 0 0;padding:7px 9px;border-radius:7px;background:rgba(75,206,151,.12);border:1px solid rgba(75,206,151,.45);color:#dee4ea;font:600 11.5px/1.35 -apple-system,'Segoe UI',sans-serif;animation:qfRunIn .2s ease-out}
+    .qf-run-rec{width:7px;height:7px;border-radius:50%;background:#f87168;flex:none;animation:qfRec 1.6s ease-out infinite}
+    .qf-run-clock{font-size:13px;font-weight:750;font-variant-numeric:tabular-nums;color:#b6f1d5}
+    .qf-run-k::before{content:attr(data-k);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#85b8ff}
+    .qf-run-due{margin-left:auto;color:#c7d1db;white-space:nowrap}
+    .qf-run-due.today{color:#f5cd47}.qf-run-due.late{color:#ffa69e}
+    .qf-run-bar{flex:1 1 100%;height:4px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden}
+    .qf-run-bar i{display:block;height:100%;border-radius:2px;background:#4bce97;transition:width .4s ease}
+    .qf-run-bar.over i{background:#f87168}
+    .qf-run-t{flex:1 1 100%;color:#9fadbc;font-weight:500}
+    .qf-run-t b{color:#dee4ea;font-weight:650}.qf-run-t .over{color:#ffa69e}
+    @keyframes qfRec{50%{opacity:.35}}
+    @keyframes qfRunIn{from{opacity:0;transform:translateY(-3px)}}
+    @media(prefers-reduced-motion:reduce){.qf-run,.qf-run-rec,.qf-run-bar i{animation:none;transition:none}}`;
   document.head.append(pageCss);
 
   const $ = (s) => root.querySelector(s);
-  const launch = $('.launch'), day = $('.day'), dock = $('.dock'), colBox = $('.colbtns');
+  const launch = $('.launch'), day = $('.day'), dock = $('.dock'), colBox = $('.colbtns'), sideEl = $('.mside');
   const body = $('.body'), tabsEl = $('.tabs'), whoEl = $('.who'), modesEl = $('.modes'), sizesEl = $('.sizes');
 
   /* ================================================================ */
@@ -398,6 +414,68 @@
     toggleDeploy(found.key);
   }, true);
 
+  /* ---------------- Faixa "rodando agora" no card ----------------
+   * Embaixo do card da demanda com o cronômetro ligado: o tempo correndo, a data limite e a estimativa
+   * (o que já foi apontado, mais o tempo rodando, contra a estimativa original). Se o cronômetro está numa
+   * subtarefa, a faixa vai no card da demanda-mãe, com a chave da subtarefa. */
+  let runInfo = null, runLoading = '', runStrip = null;
+  async function loadRunInfo(k) {
+    if (runLoading === k) return;
+    runLoading = k;
+    try {
+      const i = await api(`issue/${k}?fields=duedate,timetracking,parent`);
+      const f = i?.fields || {}, tt = f.timetracking || {}, min = (sec) => (Number.isFinite(sec) ? Math.round(sec / 60) : null);
+      runInfo = { key: k, parentKey: f.parent?.key || '', due: f.duedate || '', est: min(tt.originalEstimateSeconds) || 0,
+        spent: min(tt.timeSpentSeconds) || 0, remaining: min(tt.remainingEstimateSeconds), at: Date.now() };
+    } catch { runInfo = { key: k, parentKey: '', due: '', est: 0, spent: 0, remaining: null, at: Date.now(), failed: true }; }
+    finally { runLoading = ''; }
+    paintRunStrip();
+  }
+  function runStripHtml(f, info, onParent) {
+    const running = Math.max(0, Math.floor((Date.now() - f.start) / 60000));
+    const today = new Date(), iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    let due = '<span class="qf-run-due">sem data limite</span>';
+    if (info?.due) {
+      const late = info.due < iso(today), isToday = info.due === iso(today);
+      const dm = `${info.due.slice(8, 10)}/${info.due.slice(5, 7)}`;
+      due = `<span class="qf-run-due ${late ? 'late' : isToday ? 'today' : ''}" title="Data limite: ${esc(dm)}">${late ? `⚠ venceu ${esc(dm)}` : isToday ? 'vence hoje' : `até ${esc(dm)}`}</span>`;
+    }
+    let bar = '', tempo = '';
+    if (info && !info.failed) {
+      const used = info.spent + running;
+      if (info.est) {
+        const left = (info.remaining ?? Math.max(0, info.est - info.spent)) - running;
+        const over = left < 0;
+        bar = `<span class="qf-run-bar ${over ? 'over' : ''}" aria-hidden="true"><i style="width:${Math.min(100, Math.round((used / info.est) * 100))}%"></i></span>`;
+        tempo = `<span class="qf-run-t"><b>${esc(formatMinutes(used))}</b> de ${esc(formatMinutes(info.est))} estimado · ${over ? `<span class="over">passou ${esc(formatMinutes(-left))}</span>` : `restam ${esc(formatMinutes(left))}`}</span>`;
+      } else {
+        tempo = `<span class="qf-run-t"><b>${esc(formatMinutes(used))}</b> no total, contando o de agora · sem estimativa</span>`;
+      }
+    }
+    return `<span class="qf-run-rec" aria-hidden="true"></span>${onParent ? `<span class="qf-run-k" data-k="${esc(f.key)}"></span>` : ''}<b class="qf-run-clock" data-since="${f.start}">${esc(clockText(f.start))}</b>${due}${bar}${tempo}`;
+  }
+  function paintRunStrip(cards) {
+    const f = active && !dialogOpen ? focus : null;
+    if (!f) { runStrip?.remove(); runStrip = null; return; }
+    if (!runLoading && (runInfo?.key !== f.key || Date.now() - runInfo.at > 120000)) loadRunInfo(f.key);
+    const info = runInfo?.key === f.key ? runInfo : null;
+    cards ||= cardNodes();
+    const own = cards.get(f.key), node = own || (info?.parentKey && cards.get(info.parentKey));
+    if (!node) { runStrip?.remove(); runStrip = null; return; }
+    if (!runStrip) {
+      runStrip = document.createElement('div');
+      runStrip.className = 'qf-run';
+      runStrip.dataset.qfOwned = 'true';
+      runStrip.setAttribute('role', 'status');
+      runStrip.setAttribute('aria-label', `Cronômetro rodando em ${f.key}`);
+      for (const type of ['pointerdown', 'mousedown', 'click']) runStrip.addEventListener(type, (e) => e.stopPropagation());
+    }
+    if (runStrip.parentNode !== node) node.append(runStrip);
+    // Redesenha só quando muda algo além do relógio (que o tick atualiza a cada segundo).
+    const sig = [f.key, f.start, info?.at, Math.floor((Date.now() - f.start) / 60000), !own].join('|');
+    if (runStrip.dataset.sig !== sig) { runStrip.innerHTML = runStripHtml(f, info, !own); runStrip.dataset.sig = sig; }
+  }
+
   /* Botões sobre as colunas: listar todas as demandas da coluna na barra. */
   function placeColButtons() {
     if (!active || dialogOpen) { colBox.replaceChildren(); return; }
@@ -544,6 +622,7 @@
     </div>`;
   }
   function paintDay() {
+    paintSide();
     if (!active || expandedDay || !dayData) return;
     const rep = dayData.rep;
     const m = timelineMetrics(rep), done = m.total >= m.goal, wd = rep.workday, width = wd.end - wd.start;
@@ -581,8 +660,8 @@
   function showMsg(text, cls = '', undo = false) {
     dayMsg = { text, cls, undo };
     clearTimeout(msgTimer);
-    msgTimer = setTimeout(() => { dayMsg = null; lastLog = undo ? null : lastLog; paintDay(); }, undo ? 30000 : 12000);
-    paintDay();
+    msgTimer = setTimeout(() => { dayMsg = null; lastLog = undo ? null : lastLog; paintDay(); paintSide(); }, undo ? 30000 : 12000);
+    paintDay(); paintSide();
   }
   async function setDay(open) {
     expandedDay = open; daySeq++;
@@ -597,6 +676,128 @@
   window.addEventListener('message', (e) => {
     if (expandedDay && e.source === day.querySelector('iframe')?.contentWindow && e.origin === new URL(url('')).origin && e.data?.type === 'DASHFILL_COLLAPSE') setDay(false);
   });
+
+  /* ================================================================ */
+  /* Painel ao lado do modal da demanda: Meu dia da demanda e das subtarefas */
+  /* ================================================================ */
+  const SIDE_OPEN = 'qf.dev.dashfill.side.open';
+  const side = { key: '', data: null, at: 0, seq: 0, loading: false, error: '', expanded: false };
+  try { side.expanded = localStorage.getItem(SIDE_OPEN) === '1'; } catch { /* sem storage */ }
+  /* O modal da demanda do Jira: o maior diálogo visível (ignora menus e confirmações pequenas). */
+  function issueDialog() {
+    let best = null, area = 0;
+    for (const el of document.querySelectorAll('[role="dialog"],[aria-modal="true"]')) {
+      if (host.contains(el) || el.closest('[hidden],[aria-hidden="true"]') || !el.checkVisibility?.({ visibilityProperty: true })) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 420 || r.height < 300) continue;
+      if (r.width * r.height > area) { area = r.width * r.height; best = el; }
+    }
+    return best;
+  }
+  /* Qual demanda está aberta: ?selectedIssue= no quadro, ou a chave no topo do modal. */
+  function dialogKey(dlg) {
+    const q = new URLSearchParams(location.search);
+    const fromUrl = q.get('selectedIssue') || q.get('selectedIssueKey');
+    if (validKey(fromUrl)) return fromUrl;
+    const m = location.pathname.match(/\/browse\/([A-Z][A-Z0-9_]*-\d+)/);
+    if (m) return m[1];
+    for (const a of dlg.querySelectorAll(ISSUE_LINK)) {
+      const k = issueKey(a.href);
+      if (validKey(k) && a.textContent.trim() === k) return k;
+    }
+    return '';
+  }
+  async function loadSide(k) {
+    const s = ++side.seq;
+    side.loading = true; side.error = '';
+    try {
+      const iss = await api(`issue/${k}?fields=summary,status,parent,issuetype,timetracking`);
+      const f = iss.fields || {};
+      const parentKey = f.issuetype?.subtask ? f.parent?.key : '';
+      // Demanda: as subtarefas dela. Subtarefa: as irmãs (subtarefas da mesma demanda).
+      const subs = await jql(`parent = ${parentKey || k} ORDER BY created ASC`, ['summary', 'status', 'timetracking', 'assignee'], 40).catch(() => []);
+      if (s !== side.seq) return;
+      const item = (key, ff = {}) => ({ key, summary: ff.summary || '', status: ff.status?.name || '', cat: ff.status?.statusCategory?.key || '',
+        spent: Math.round((ff.timetracking?.timeSpentSeconds || 0) / 60), who: ff.assignee?.displayName || '' });
+      side.data = { main: item(k, f), parent: parentKey ? { key: parentKey, summary: f.parent?.fields?.summary || '' } : null,
+        subs: subs.map((i) => item(i.key, i.fields)).filter((i) => i.key !== k) };
+      side.at = Date.now();
+    } catch (e) { if (s === side.seq) side.error = e.message; }
+    finally { if (s === side.seq) { side.loading = false; paintSide(); } }
+  }
+  /* Minutos apontados hoje por demanda, pela linha do tempo do Meu dia. */
+  function todayByKey() {
+    const out = {};
+    for (const e of dayData?.rep?.entries || []) out[e.key] = (out[e.key] || 0) + Math.max(0, (e.end || 0) - (e.start || 0));
+    return out;
+  }
+  function sideRow(it, today, main = false) {
+    const on = focus?.key === it.key;
+    const doing = isDoingStatus(it.status, it.cat);
+    const t = today[it.key] || 0;
+    return `<div class="ms-it ${main ? 'main' : ''} ${on ? 'on' : ''}">
+      <div class="ms-top"><span class="k">${esc(it.key)}</span><span class="pill ${statusTone(it.cat, it.status)}">${esc(it.status || '—')}</span></div>
+      <span class="ms-t" title="${esc(it.summary)}">${esc(it.summary)}</span>
+      <div class="ms-ft">${on
+        ? `<b class="clock" data-since="${focus.start}">${esc(clockText(focus.start))}</b><button class="play on" data-pause aria-label="Pausar e apontar ${esc(it.key)}" title="Pausar e apontar">⏸</button>`
+        : `<small class="muted">${t ? `hoje ${esc(formatMinutes(t))}` : 'nada hoje'}${side.expanded && it.spent ? ` · total ${esc(formatMinutes(it.spent))}` : ''}</small><button class="play" data-play="${esc(it.key)}" data-title="${esc(it.summary)}" data-doing="${doing ? '1' : ''}" aria-label="Iniciar o cronômetro em ${esc(it.key)}" title="${focus ? `Pausa ${esc(focus.key)} (aponta) e começa aqui` : 'Iniciar o cronômetro'}">▶</button>`}</div>
+    </div>`;
+  }
+  function paintSide() {
+    if (sideEl.hidden && !side.key) return;
+    const d = side.data, today = todayByKey();
+    const narrow = sideEl.classList.contains('tab');
+    if (narrow) {
+      sideEl.innerHTML = `<button class="ms-tab" data-action="ms-toggle" aria-expanded="false" title="Abrir o Meu dia desta demanda"><span class="mark">QF</span>${focus ? `<b class="clock" data-since="${focus.start}">${esc(clockText(focus.start))}</b>` : '<span>⏱</span>'}</button>`;
+      return;
+    }
+    const goal = dayData ? timelineMetrics(dayData.rep) : null;
+    const pct = goal ? Math.min(100, Math.round(goal.percent)) : 0;
+    const otherRunning = focus && d && focus.key !== d.main.key && !d.subs.some((x) => x.key === focus.key);
+    sideEl.innerHTML = `<div class="ms-h"><span class="mark">QF</span><b>Meu dia</b>
+        <button class="ic sm" data-action="ms-refresh" title="Atualizar" aria-label="Atualizar">↻</button>
+        <button class="ic sm" data-action="ms-toggle" aria-expanded="${side.expanded}" title="${side.expanded ? 'Recolher' : 'Expandir'}" aria-label="${side.expanded ? 'Recolher o painel' : 'Expandir o painel'}">${side.expanded ? '⇤' : '⇥'}</button></div>
+      ${goal ? `<div class="ms-goal" title="${esc(formatMinutes(goal.total))} apontadas de ${esc(formatMinutes(goal.goal))}"><div class="ms-bar"><i style="width:${pct}%"></i></div><small>${esc(formatMinutes(goal.total))} de ${esc(formatMinutes(goal.goal))} hoje</small></div>` : ''}
+      ${otherRunning ? `<div class="ms-other"><small>Rodando em <b>${esc(focus.key)}</b></small><b class="clock" data-since="${focus.start}">${esc(clockText(focus.start))}</b><button class="play on" data-pause aria-label="Pausar e apontar ${esc(focus.key)}" title="Pausar e apontar">⏸</button></div>` : ''}
+      ${dayMsg ? `<div class="d-msg ${dayMsg.cls || ''}" role="status"><span>${esc(dayMsg.text)}</span>${dayMsg.undo ? '<button class="lnk" data-undo>Desfazer</button>' : ''}</div>` : ''}
+      ${!d ? (side.error ? note(side.error, 'err') : '<div class="skel"><i></i><i></i></div>') : `
+        ${d.parent ? `<small class="muted ms-par">Subtarefa de <b>${esc(d.parent.key)}</b></small>` : ''}
+        ${sideRow(d.main, today, true)}
+        ${focus?.key === d.main.key ? '<button class="lnk ms-disc" data-discard>Descartar sem apontar</button>' : ''}
+        ${d.subs.length ? `<div class="sub">${d.parent ? 'Outras subtarefas' : 'Subtarefas'} <span class="muted">${d.subs.length}</span></div>
+          <div class="ms-subs">${d.subs.map((x) => sideRow(x, today)).join('')}</div>` : ''}
+        ${side.expanded ? `<div class="ms-acts">
+          <button class="btn sm" data-toggle-deploy="${esc(d.main.key)}">${deployList.includes(d.main.key) ? '✓ Na lista do deploy' : '⇪ Colocar no deploy'}</button>
+          <button class="btn sm" data-copy="${esc(d.main.key)} — ${esc(d.main.summary)}">Copiar chave e título</button>
+          <a class="btn sm" href="/browse/${esc(d.main.key)}" target="_blank" rel="noopener">Abrir em nova aba ↗</a></div>` : ''}`}`;
+  }
+  function updateSide() {
+    const dlg = active && dialogOpen ? issueDialog() : null;
+    const k = dlg ? dialogKey(dlg) : '';
+    if (!k) {
+      if (!sideEl.hidden) { sideEl.hidden = true; sideEl.replaceChildren(); }
+      side.key = ''; side.data = null; side.seq++;
+      return;
+    }
+    const r = dlg.getBoundingClientRect(), space = r.left;
+    const fits = space >= 132;
+    const narrow = !fits && !side.expanded;
+    // Recolhido: cabe no vazio à esquerda do modal. Expandido: mais largo, pode passar por cima da borda do modal.
+    const width = narrow ? 0 : side.expanded ? Math.min(360, Math.max(300, space - 20)) : Math.min(260, space - 16);
+    sideEl.classList.toggle('tab', narrow);
+    sideEl.classList.toggle('wide', side.expanded);
+    const css = `top:${Math.round(Math.max(r.top, 8))}px;max-height:${Math.round(Math.min(r.height, innerHeight - 16))}px;${narrow ? '' : `width:${Math.round(width)}px;`}`;
+    if (sideEl.style.cssText !== css) sideEl.style.cssText = css;
+    const changed = k !== side.key, wasHidden = sideEl.hidden;
+    sideEl.hidden = false;
+    if (changed) { side.key = k; side.data = null; paintSide(); loadSide(k); }
+    else if (wasHidden || sideEl.dataset.mode !== String(narrow)) paintSide();
+    else if (!side.loading && Date.now() - side.at > 60000) loadSide(k);
+    sideEl.dataset.mode = String(narrow);
+  }
+  // O modal do Jira fecha com clique "fora" dele: os cliques no painel não podem chegar ao Jira.
+  // Para no host (depois do handler do shadow, que já tratou o clique).
+  for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click', 'keydown']) host.addEventListener(type, (e) => { if (dialogOpen) e.stopPropagation(); });
 
   /* ================================================================ */
   /* Barra de baixo                                                    */
@@ -885,7 +1086,7 @@
   }
   /* Cronômetro: começar (pausando e apontando o que estava rodando), pausar e apontar, descartar e desfazer. */
   let lastLog = null, timerBusy = false;
-  const redrawTimer = () => { paintDay(); drawBar(); if (view === 'focus') renderFocus(); };
+  const redrawTimer = () => { paintDay(); paintSide(); drawBar(); paintRunStrip(); if (view === 'focus') renderFocus(); };
   async function startTimer(k, title, doing = false) {
     if (!validKey(k) || timerBusy) return;
     if (storedFocus()?.key === k) return;
@@ -906,9 +1107,11 @@
       if (!log) { showMsg(`${why ? why + ': menos' : 'Menos'} de 1 minuto em ${t.key}, nada apontado.`); return; }
       const res = await api(`issue/${t.key}/worklog?adjustEstimate=auto`, { method: 'POST', body: JSON.stringify(log.body) });
       lastLog = { key: t.key, id: res?.id, timer: t };
+      runInfo = null;
       cache.delete(t.key);
       showMsg(`${why ? why + ': apontado' : 'Apontado'} ${formatMinutes(log.minutes)} em ${t.key} (${hhmm(t.start)}–${hhmm(Math.min(end, t.start + log.minutes * 60000))}).`, 'ok', !!res?.id);
       refreshedAt = 0;   // a meta do dia muda: relê na próxima volta
+      if (dialogOpen) { refreshDay(); if (side.key) loadSide(side.key); }
     } catch (err) {
       focus = t; saveFocus();
       showMsg(`Não deu para apontar em ${t.key}: ${err.message} O cronômetro continua rodando.`, 'err');
@@ -933,6 +1136,7 @@
       await api(`issue/${l.key}/worklog/${l.id}?adjustEstimate=auto`, { method: 'DELETE' });
       cache.delete(l.key);
       if (!storedFocus()) { focus = l.timer; saveFocus(); }   // volta a rodar de onde estava
+      runInfo = null;
       showMsg(`Apontamento em ${l.key} desfeito${focus?.key === l.key ? '; o cronômetro voltou a rodar' : ''}.`);
       refreshedAt = 0;
     } catch (err) { showMsg(`Não deu para desfazer em ${l.key}: ${err.message}`, 'err'); }
@@ -943,7 +1147,7 @@
   function toggleDeploy(k) {
     if (!validKey(k)) return;
     deployList = deployList.includes(k) ? deployList.filter((x) => x !== k) : [...deployList, k];
-    saveDeploy(); paintCards(); drawBar();
+    saveDeploy(); paintCards(); drawBar(); paintSide();
     if (view === 'deploy') renderDeploy();
     else if (view === 'column' || (view === 'issue' && tab === 'resumo')) render();
   }
@@ -1080,6 +1284,13 @@
     }
     if (b.dataset.size) { size = b.dataset.size; try { localStorage.setItem(SIZE, size); } catch { /* sem storage */ } applySize(); folded = false; drawBar(); render(); return; }
     if (b.dataset.col !== undefined) { const c = columns()[Number(b.dataset.col)]; if (c) openColumn(c); return; }
+    if (a === 'ms-toggle') {
+      side.expanded = !side.expanded;
+      try { localStorage.setItem(SIDE_OPEN, side.expanded ? '1' : '0'); } catch { /* sem storage */ }
+      updateSide(); paintSide();
+      return;
+    }
+    if (a === 'ms-refresh') { loadSide(side.key); refreshDay(); return; }
     if (a === 'day') setDay(!expandedDay);
     else if (a === 'day-refresh') refreshDay();
     else if (a === 'refresh') { if (view === 'issue') openIssue(key, true); else { cache.clear(); render(); } }
@@ -1130,7 +1341,8 @@
       seq++; daySeq++; dayData = null;
       key = ''; current = null; colView = null; expandedDay = false; folded = true; view = 'issue'; confirmBox = null; myKeys = null;
       day.classList.remove('expanded'); day.replaceChildren(); body.replaceChildren(); colBox.replaceChildren();
-      releaseBoard(); paintCards();
+      sideEl.hidden = true; sideEl.replaceChildren(); side.key = ''; side.data = null;
+      releaseBoard(); paintCards(); paintRunStrip();
     }
   }
   launch.onclick = () => {
@@ -1145,8 +1357,9 @@
 
   function tick() {
     for (const c of root.querySelectorAll('.clock[data-since]')) c.textContent = clockText(Number(c.dataset.since));
+    if (runStrip?.isConnected) { const c = runStrip.querySelector('.qf-run-clock'); if (c) c.textContent = clockText(Number(c.dataset.since)); }
   }
-  setInterval(() => { if (active && !dialogOpen) tick(); }, 1000);
+  setInterval(() => { if (active) tick(); }, 1000);
   // Outra aba do Jira começou, pausou ou descartou o cronômetro: acompanha aqui.
   addEventListener('storage', (e) => {
     if (e.key !== FOCUS && e.key !== SKIP) return;
@@ -1163,24 +1376,26 @@
     updateDialog();
     if (!active || dialogOpen) return;
 
-    geometry(); reserveBoard(); paintCards(); tick();
+    geometry(); reserveBoard(); paintCards(); paintRunStrip(); tick();
     if (!document.hidden && !expandedDay && Date.now() - refreshedAt > 60000) refreshDay();
   }
   const dialogSelector = 'dialog[open],[role="dialog"],[role="alertdialog"],[aria-modal="true"],.jqf-backdrop';
   function updateDialog() {
     const visible = [...document.querySelectorAll(dialogSelector)].some(el =>
       !el.closest('[hidden],[aria-hidden="true"]') && el.checkVisibility({ visibilityProperty: true }));
-    if (visible === dialogOpen) return;
+    if (visible === dialogOpen) { updateSide(); return; }
     dialogOpen = visible;
-    host.style.display = visible ? 'none' : '';
+    // Com o modal aberto só o painel da demanda aparece; lateral, barra e botões de coluna somem.
+    host.toggleAttribute('data-dialog', visible);
     reserveBoard();
+    updateSide();
   }
   new MutationObserver(records => {
     if (dialogOpen || records.some(record => record.type === 'attributes' ||
       [...record.addedNodes].some(node => node.nodeType === 1 && (node.matches(dialogSelector) || node.querySelector(dialogSelector))))) updateDialog();
   }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['role', 'aria-modal', 'aria-hidden', 'open', 'hidden'] });
   new ResizeObserver(() => { reserveBoard(); placeColButtons(); }).observe(dock);
-  addEventListener('resize', geometry, { passive: true });
+  addEventListener('resize', () => { geometry(); if (dialogOpen) updateSide(); }, { passive: true });
   addEventListener('scroll', placeColButtons, { passive: true, capture: true });
   sync();
   setInterval(sync, 1200);

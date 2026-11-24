@@ -372,3 +372,41 @@ textarea.inp { resize: vertical; }
   .body, .confirm, .skel i, .mode .dot { animation: none; }
   .launch, .launch .sw, .launch .sw i, .btn, .tab { transition: none; }
 }
+
+/* Modal da demanda aberto: some a lateral, a barra e os botões; fica só o painel ao lado do modal */
+:host([data-dialog]) .launch, :host([data-dialog]) .colbtns, :host([data-dialog]) .day, :host([data-dialog]) .dock { display: none !important; }
+.mside { position: fixed; z-index: 10000; left: 10px; display: flex; flex-direction: column; gap: 8px; padding: 10px; box-sizing: border-box; border-radius: 12px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: 0 12px 32px rgba(0, 0, 0, .45); overflow-y: auto; scrollbar-width: thin; animation: msIn .2s cubic-bezier(.2, .8, .2, 1); transition: width .2s ease; }
+.mside[hidden] { display: none; }
+.mside.wide { box-shadow: 0 16px 40px rgba(0, 0, 0, .55); }
+.mside.tab { padding: 0; border-radius: 0 10px 10px 0; left: 0; overflow: visible; }
+@keyframes msIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+.ms-tab { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px; border: 0; background: transparent; color: var(--txt); cursor: pointer; font-size: 11px; }
+.ms-tab .clock { font-size: 11px; font-variant-numeric: tabular-nums; writing-mode: vertical-rl; transform: rotate(180deg); }
+.ms-h { display: flex; align-items: center; gap: 6px; }
+.ms-h b { flex: 1; min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-h .ic.sm { width: 22px; height: 22px; }
+.ms-goal { display: flex; flex-direction: column; gap: 3px; }
+.ms-bar { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.ms-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.ms-goal small { color: var(--faint); font-size: 11px; }
+.ms-other { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px; border-radius: 8px; background: var(--accent-soft); border: 1px solid var(--accent-line); }
+.ms-other small { flex: 1 1 100%; color: var(--muted); font-size: 11px; }
+.ms-other .clock { flex: 1; font-size: 14px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.ms-par { font-size: 11px; }
+.ms-it { display: flex; flex-direction: column; gap: 4px; padding: 7px 8px; border-radius: 9px; background: var(--bg); border: 1px solid var(--line); min-width: 0; transition: border-color .15s, background .15s; }
+.ms-it.main { border-color: var(--line-strong); }
+.ms-it.on { border-color: var(--accent-line); background: var(--accent-soft); }
+.ms-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.ms-top .pill { font-size: 10.5px; padding: 0 6px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.ms-t { font-size: 12px; line-height: 1.35; color: var(--txt); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.ms-it.main .ms-t { font-weight: 650; -webkit-line-clamp: 3; }
+.mside.wide .ms-t { -webkit-line-clamp: 4; }
+.ms-ft { display: flex; align-items: center; gap: 6px; min-height: 26px; }
+.ms-ft small { flex: 1; font-size: 11px; }
+.ms-ft .clock { flex: 1; font-size: 15px; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--txt); }
+.ms-ft .play, .ms-other .play { width: 28px; height: 26px; }
+.ms-subs { display: flex; flex-direction: column; gap: 5px; }
+.ms-disc { font-size: 11.5px; align-self: flex-start; }
+.ms-acts { display: flex; flex-direction: column; gap: 5px; padding-top: 4px; border-top: 1px solid var(--line); }
+.ms-acts .btn { justify-content: center; }
+@media (prefers-reduced-motion: reduce) { .mside { animation: none; transition: none; } }
