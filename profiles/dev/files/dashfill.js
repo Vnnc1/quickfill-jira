@@ -6,14 +6,14 @@
   const url = (file) => chrome.runtime.getURL(file);
   const [
     { extractLinks, formatMinutes, formatHM, timelineMetrics, issueKey },
-    { developmentDetails, branchCommands, isDevelopmentField, deployFields, deployReport },
-    { renderHistory },
+    { developmentDetails, isDevelopmentField, deployFields, deployReport },
+    { buildHistory, fmtSpan },
     { loadAccent },
     { clockText, autoStartCandidate, addSkip, worklogFor, isDoingStatus, enteredStatusAt },
   ] = await Promise.all([
     import(url('lib/board-rules.js')),
     import(url('lib/dashfill-development.js')),
-    import(url('lib/history-view.js')),
+    import(url('lib/history.js')),
     import(url('lib/theme.js')),
     import(url('lib/focus-timer.js')),
   ]);
@@ -36,6 +36,7 @@
         <button class="btn sm" data-action="back" hidden>‹ Voltar</button>
         <span class="mark">QF</span>
         <div class="who"></div>
+        <a class="btn sm issue-jira" target="_blank" rel="noopener" hidden>Abrir no Jira ↗</a>
         <nav class="modes" aria-label="Modos do DashFill"></nav>
         <button class="btn compact-day" data-action="day">Meu dia</button>
         <div class="sizes" role="group" aria-label="Altura da barra"></div>
@@ -195,12 +196,6 @@
       default: return kids();
     }
   }
-  const plain = (node) => {
-    if (!node) return '';
-    if (typeof node === 'string') return node;
-    if (Array.isArray(node)) return node.map(plain).join(' ');
-    return node.text || node.attrs?.text || plain(node.content || []);
-  };
   /** Editor (contenteditable) → ADF: negrito, itálico, sublinhado, riscado, código, link, títulos, listas, citação. */
   function htmlToAdf(el) {
     const inline = (n, marks = []) => {
@@ -246,7 +241,7 @@
     ['focus', 'Foco', 'Só o que é seu, com o cronômetro do Meu dia'],
     ['deploy', 'Deploy', 'Lista de demandas para subir juntas'],
   ];
-  const TABS = [['resumo', 'Resumo'], ['git', 'Branches e SQL'], ['envs', 'ENVs'], ['docs', 'Docs e Figma'], ['comments', 'Comentários'], ['history', 'Histórico']];
+  const TABS = [['resumo', 'Resumo'], ['comments', 'Comentários'], ['development', 'Branches, SQL e ENVs']];
   const SIZES = { s: 230, m: 360, l: Math.round(innerHeight * 0.58) };
   let active = false, expandedDay = false, folded = true, view = 'issue', tab = 'resumo', size = 'm';
   let key = '', current = null, colView = null, route = '', refreshedAt = 0, confirmBox = null;
@@ -868,6 +863,12 @@
     body.hidden = folded;
     dock.classList.toggle('open', !folded);
     dock.dataset.view = view;
+    const jiraLink = $('.issue-jira');
+    jiraLink.hidden = view !== 'issue' || !key || folded;
+    if (!jiraLink.hidden) {
+      jiraLink.href = '/browse/' + key;
+      jiraLink.setAttribute('aria-label', 'Abrir ' + key + ' no Jira');
+    }
     modesEl.innerHTML = MODES.map(([id, label, tip]) => `<button class="mode ${view === id || (id === 'issue' && view === 'column') ? 'on' : ''}" data-mode="${id}" title="${esc(tip)}" aria-pressed="${view === id || (id === 'issue' && view === 'column')}">${label}${id === 'deploy' ? ` <b>${deployList.length}</b>` : id === 'focus' && focus ? ' <i class="dot"></i>' : ''}</button>`).join('');
     sizesEl.innerHTML = [['s', 'Baixa'], ['m', 'Média'], ['l', 'Alta']].map(([id, l]) => `<button class="sz ${size === id ? 'on' : ''}" data-size="${id}" title="Altura ${l.toLowerCase()}" aria-label="Altura ${l.toLowerCase()}" aria-pressed="${size === id}"><i class="${id}"></i></button>`).join('');
     const dq = day.querySelector('.dq b');
@@ -878,8 +879,8 @@
         : '<span class="hint">Passe o mouse em um card do quadro e clique em <b>+</b>.</span>';
       tabsEl.hidden = !key || folded;
       tabsEl.innerHTML = TABS.map(([id, l]) => {
-        const n = !current ? '' : id === 'envs' ? current.envs.length : id === 'git' ? current.branches.length + current.sql.length + current.dev.prs.length : id === 'docs' ? current.links.figma.length + current.links.confluence.length + current.links.other.length + (current.f.issuelinks || []).length : id === 'comments' ? current.comments : '';
-        return `<button class="tab ${id === tab ? 'on' : ''}" data-tab="${id}" aria-pressed="${id === tab}">${l}${n !== '' ? ` <i class="n">${n}</i>` : ''}</button>`;
+        const n = id === 'comments' ? current?.comments : null;
+        return `<button class="tab ${id === tab ? 'on' : ''}" data-tab="${id}" aria-pressed="${id === tab}">${l}${n != null ? ` <i class="n">${n}</i>` : ''}</button>`;
       }).join('');
     } else {
       tabsEl.hidden = true;
@@ -964,83 +965,76 @@
     if (!current) return;
     const d = current, f = d.f;
     if (tab === 'resumo') {
-      const t = timeOf(f.timetracking), r = readiness(d);
+      const t = timeOf(f.timetracking);
       const due = f.duedate ? new Date(f.duedate + 'T12:00') : null, late = due && due < new Date() && d.cat !== 'done';
-      const comment = (f.comment?.comments || []).at(-1);
-      body.innerHTML = `<div class="summary-tools">
-        ${focus?.key === d.key
-          ? '<button class="btn pri" data-pause title="Para o cronômetro e aponta o tempo até agora">⏸ Pausar e apontar</button>'
-          : `<button class="btn pri" data-play="${esc(d.key)}" data-title="${esc(d.summary)}" data-doing="${isDoingStatus(d.status, d.cat) ? '1' : ''}">▶ Iniciar cronômetro</button>`}
-        <button class="btn" data-toggle-deploy="${esc(d.key)}">${deployList.includes(d.key) ? 'Retirar do deploy' : 'Adicionar ao deploy'}</button>
-        <a class="btn" href="/browse/${esc(d.key)}" target="_blank" rel="noopener">Abrir no Jira ↗</a>
-        <button class="btn" data-copy="${esc(d.key)} — ${esc(d.summary)}">Copiar chave e título</button>
-      </div><div class="sum">
+      body.innerHTML = `<div class="sum">
         <section class="s-main">
-          <h3>Descrição da demanda</h3><div class="chips">
+          <div class="chips">
             ${f.issuetype?.name ? `<span class="chip">${esc(f.issuetype.name)}</span>` : ''}
             ${f.priority?.name ? `<span class="chip pr-${esc(f.priority.name.toLowerCase())}">Prioridade ${esc(f.priority.name)}</span>` : ''}
             ${(f.labels || []).slice(0, 4).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}
             ${f.parent ? `<span class="chip">Pai: ${esc(f.parent.key)}</span>` : ''}
           </div>
-          <div class="rich desc">${f.description ? adf(f.description) : '<p class="muted">Sem descrição.</p>'}</div>
+          <details class="issue-description" open><summary>Descrição da demanda</summary><div class="rich desc">${f.description ? adf(f.description) : '<p class="muted">Sem descrição.</p>'}</div></details>
+          ${summaryDocuments(d)}
         </section>
         <aside class="s-side">
-          <section class="summary-comments">
-            <div class="section-head"><h3>Comentários <span>${d.comments}</span></h3><button class="btn sm" data-tab="comments">${d.comments ? 'Ver comentários' : 'Comentar'}</button></div>
-            ${comment ? `<b>${esc(comment.author?.displayName || 'Comentário')}</b><p>${esc(plain(comment.body))}</p>` : note(d.comments ? 'Consulte os comentários da demanda.' : 'Ainda não há comentários.')}
-          </section>
           <div class="facts">
             <div class="fact">${avatar(f.assignee?.displayName || 'Sem responsável')}<span><small>Responsável</small><b>${esc(f.assignee?.displayName || 'Sem responsável')}</b></span></div>
             <div class="fact"><span class="fi ${late ? 'bad' : ''}">◷</span><span><small>Data limite</small><b class="${late ? 'bad-t' : ''}">${due ? esc(due.toLocaleDateString('pt-BR')) + (late ? ' · atrasada' : '') : 'sem data'}</b></span></div>
             <div class="fact"><span class="fi">↻</span><span><small>Atualizada</small><b>${esc(ago(f.updated))}</b></span></div>
           </div>
           <div class="tt"><div class="row"><small>Controle de tempo</small><b>${esc(t.txt)}</b><span class="muted">de ${esc(t.estTxt)}</span></div><div class="meter ${t.over ? 'over' : ''}"><i style="width:${t.pct}%"></i></div></div>
-          <div class="section-head"><span class="pill ${r.tone}">${esc(r.txt)}</span><button class="btn sm" data-tab="git">Ver branches e SQL</button></div>
+          <section class="summary-history"><h3>Histórico</h3><div data-history>${note('Carregando movimentações…')}</div></section>
         </aside>
       </div>`;
-      return;
-    }
-    if (tab === 'git') { body.innerHTML = developmentHtml(d); return; }
-    if (tab === 'envs') {
-      body.innerHTML = `<div class="development">${commandSection(d.envs, true)}${originalFields(d)}</div>`;
-      return;
-    }
-    if (tab === 'docs') {
-      const L = d.links;
-      const tile = (l, kind) => { const u = safeUrl(l.url); return u ? `<a class="doc ${kind}" href="${esc(u)}" target="_blank" rel="noopener"><span class="doc-ic">${kind === 'figma' ? 'F' : kind === 'conf' ? 'C' : '↗'}</span><span class="doc-t">${esc(l.title || u)}</span><small>${esc(new URL(u).hostname)}</small></a>` : ''; };
-      const linked = (f.issuelinks || []).map((l) => { const o = l.outwardIssue || l.inwardIssue; if (!o) return ''; const st = o.fields?.status; return `<button class="lk" data-key="${esc(o.key)}"><span class="k">${esc(o.key)}</span><span class="lk-t">${esc(o.fields?.summary || '')}</span><span class="muted">${esc(l.outwardIssue ? l.type?.outward : l.type?.inward)}</span><span class="pill ${statusTone(st?.statusCategory?.key, st?.name)}">${esc(st?.name || '')}</span></button>`; }).join('');
-      const any = L.figma.length + L.confluence.length + L.other.length;
-      body.innerHTML = `<div class="cols2">
-        <section><h3>Figma e documentos <span class="muted">${any}</span></h3>${any ? `<div class="docs">${L.figma.map((l) => tile(l, 'figma')).join('')}${L.confluence.map((l) => tile(l, 'conf')).join('')}${L.other.map((l) => tile(l, 'oth')).join('')}</div>` : '<div class="empty sm"><p>Nenhum Figma, Confluence ou link na demanda.</p></div>'}</section>
-        <section><h3>Demandas ligadas <span class="muted">${(f.issuelinks || []).length}</span></h3>${linked ? `<div class="lks">${linked}</div>` : '<div class="empty sm"><p>Nenhuma demanda ligada.</p></div>'}</section>
-      </div>`;
+      showSummaryHistory(d, body.querySelector('[data-history]'));
       return;
     }
     if (tab === 'comments') return renderComments(d);
-    if (tab === 'history') {
-      const s = seq;
-      body.innerHTML = skeleton();
-      send('ISSUE_HISTORY', { key: d.key }).then((data) => {
-        if (s !== seq || tab !== 'history' || view !== 'issue') return;
-        // O histórico usa o CSS do QuickFill: fica num shadow próprio para não misturar com o do DashFill.
-        body.innerHTML = '<div class="hist-host"></div>';
-        const sh = body.firstChild.attachShadow({ mode: 'open' });
-        sh.innerHTML = `<link rel="stylesheet" href="${url('modal.css')}"><style>:host{display:block;color:#e3e8ee;font:13px/1.45 -apple-system,'Segoe UI',sans-serif}.hist-dlg{max-width:none;max-height:none;box-shadow:none;background:transparent;border:0}.hist-body{max-height:none;overflow:visible}</style><div class="hist-dlg"></div>`;
-        loadAccent('dev', body.firstChild);
-        renderHistory(sh.querySelector('.hist-dlg'), data, { key: d.key, base: location.origin, openIssue: () => window.open('/browse/' + d.key, '_blank', 'noopener'), onClose: () => { folded = true; drawBar(); } });
-      }).catch((e) => { if (s === seq && view === 'issue' && tab === 'history') body.innerHTML = note(e.message, 'err'); });
-    }
+    if (tab === 'development') body.innerHTML = developmentHtml(d);
   }
 
-  function commandSection(entries, env) {
-    const noun = env ? 'ENV' : 'SQL', title = env ? 'Variáveis de ambiente' : 'Comandos SQL';
-    const all = entries.map(entry => entry.command).join(env ? '\n' : '\n\n');
-    const rows = entries.map(({ section, command }, i) => {
-      const heading = section && section !== entries[i - 1]?.section ? `<li class="env-group">${esc(section)}</li>` : '';
-      return heading + `<li class="sql-row"><pre>${esc(command)}</pre><button class="btn sm" data-copy="${esc(command)}">Copiar ${noun}</button></li>`;
-    }).join('');
-    return `<div class="section-head"><h3>${title} <span>${entries.length}</span></h3>${entries.length > 1 ? `<button class="btn sm" data-copy="${esc(all)}">${env ? 'Copiar todas as ENVs' : 'Copiar todo o SQL'}</button>` : ''}</div>
-      ${rows ? `<ul class="ref-list">${rows}</ul>` : note(env ? 'Nenhuma ENV identificada nesta demanda.' : 'Nenhum comando SQL identificado nesta demanda.')}`;
+  function summaryDocuments(d) {
+    const L = d.links;
+    const tile = (l, kind) => { const u = safeUrl(l.url); return u ? `<a class="doc ${kind}" href="${esc(u)}" target="_blank" rel="noopener"><span class="doc-ic">${kind === 'figma' ? 'F' : kind === 'conf' ? 'C' : '↗'}</span><span class="doc-t">${esc(l.title || u)}</span><small>${esc(new URL(u).hostname)}</small></a>` : ''; };
+    const linked = (d.f.issuelinks || []).map((l) => { const o = l.outwardIssue || l.inwardIssue; if (!o) return ''; const st = o.fields?.status; return `<button class="lk" data-key="${esc(o.key)}"><span class="k">${esc(o.key)}</span><span class="lk-t">${esc(o.fields?.summary || '')}</span><span class="muted">${esc(l.outwardIssue ? l.type?.outward : l.type?.inward)}</span><span class="pill ${statusTone(st?.statusCategory?.key, st?.name)}">${esc(st?.name || '')}</span></button>`; }).join('');
+    const docs = [...L.figma.map(l => tile(l, 'figma')), ...L.confluence.map(l => tile(l, 'conf')), ...L.other.map(l => tile(l, 'oth'))].filter(Boolean);
+    return `<div class="summary-docs">
+      <section><h3>Docs e Figma <span class="muted">${docs.length}</span></h3>${docs.length ? `<div class="docs">${docs.slice(0, 3).join('')}</div>` : note('Nenhum documento vinculado.')}
+      ${docs.length > 3 ? `<details class="issue-more"><summary>Ver mais documentos (${docs.length - 3})</summary><div class="docs">${docs.slice(3).join('')}</div></details>` : ''}</section>
+      ${linked ? `<details class="issue-more"><summary>Demandas ligadas (${d.f.issuelinks.length})</summary><div class="lks">${linked}</div></details>` : ''}
+    </div>`;
+  }
+
+  const summaryHistories = new WeakMap();
+  async function showSummaryHistory(d, target) {
+    try {
+      let request = summaryHistories.get(d);
+      if (!request) {
+        request = send('ISSUE_HISTORY', { key: d.key });
+        summaryHistories.set(d, request);
+      }
+      const data = await request;
+      if (!target.isConnected) return;
+      if (!data?.created && !data?.transitions?.length) {
+        target.innerHTML = note('Nenhuma movimentação registrada.');
+        return;
+      }
+      const nodes = buildHistory(data).nodes.reverse();
+      const events = nodes.map(n => {
+        const when = new Date(n.at);
+        return `<li${n.back ? ' class="return"' : ''}><b>${esc(n.title)}</b>
+          <small><time datetime="${esc(when.toISOString())}">${esc(when.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }))}</time>${n.by ? ' · ' + esc(n.by) : ''}</small>
+          ${n.stayedPrev > 0 ? `<small>${esc(fmtSpan(n.stayedPrev))} na etapa anterior</small>` : ''}
+          ${n.note ? `<p>${esc(n.note)}</p>` : ''}</li>`;
+      });
+      target.innerHTML = `<ol class="issue-timeline">${events.slice(0, 3).join('')}</ol>` +
+        (events.length > 3 ? `<details class="issue-more"><summary>Ver movimentações anteriores (${events.length - 3})</summary><ol class="issue-timeline">${events.slice(3).join('')}</ol></details>` : '');
+    } catch (error) {
+      summaryHistories.delete(d);
+      if (target.isConnected) target.innerHTML = note(error.message, 'err') + '<button class="btn sm" data-action="history-retry">Tentar novamente</button>';
+    }
   }
 
   function sourceFieldHtml({ name, value, text }) {
@@ -1053,6 +1047,26 @@
   }
 
   function developmentHtml(d) {
+    return `<div class="development">
+      <div class="development-actions"><button class="btn sm pri" data-copy="${esc(deployReport([d]))}">Copiar tudo da demanda</button></div>
+      <div class="development-fields">${deployFields(d).map(developmentSection).join('')}</div>
+      ${pullRequestsHtml(d)}${originalFields(d)}</div>`;
+  }
+  function developmentSection(field) {
+    const { entries, label } = field;
+    const all = entries.map(e => e.text).join(label === 'SQL' ? '\n\n' : '\n');
+    const limit = 5;
+    return `<section aria-label="${label}">
+      <div class="section-head"><h3>${label} <span>${entries.length}</span></h3>
+        ${all ? `<button class="btn sm" data-copy="${esc(all)}">Copiar ${label === 'Branches' ? 'branches' : label}</button>` : ''}</div>
+      ${entries.length ? `<ul class="field-values">${fieldRows(field, 0, limit)}</ul>` : note('Nenhum item neste campo.')}
+      ${entries.length > limit ? `<details class="issue-more"><summary>Ver mais ${entries.length - limit} itens</summary><ul class="field-values">${fieldRows(field, limit)}</ul></details>` : ''}
+      </section>`;
+  }
+  function pullRequestsHtml(d) {
+    const linkedBranches = d.dev.branches.filter(b => b.name && !d.deploy.branches.some(ref =>
+      ref.name === b.name && (!ref.repo || !b.repo || ref.repo.toLowerCase() === b.repo.toLowerCase())));
+    const gitFields = { label: 'Branches do Git', entries: linkedBranches.map(b => ({ group: b.repo, text: b.name })) };
     const prs = d.dev.prs.map((p) => {
       const ok = p.reviewers.filter((x) => x.ok).length;
       return `<article class="g-card pr-card ${p.state.toLowerCase()}">
@@ -1061,25 +1075,12 @@
         <div class="row gap muted">${esc(p.repo)}${p.at ? ' · atualizado ' + esc(ago(p.at)) : ''}<span class="grow"></span>${p.reviewers.length ? `<span class="revs">${p.reviewers.map((x) => `<span class="rev ${x.ok ? 'ok' : ''}" title="${esc(x.name)}${x.ok ? ' aprovou' : ' ainda não aprovou'}">${esc(initials(x.name))}</span>`).join('')}</span><span>${ok}/${p.reviewers.length} aprovações</span>` : '<span>sem revisores</span>'}</div>
       </article>`;
     }).join('');
-    const branchText = d.branches.map(b => {
-      const { checkout, merge } = branchCommands(b.name);
-      return [b.repo ? b.repo + ' · ' + b.name : b.name, checkout, merge].join('\n');
-    });
-    const all = [...branchText, ...d.sql].join('\n\n');
-    const brs = d.branches.map(b => {
-      const { checkout, merge } = branchCommands(b.name);
-      return `<li class="branch-row"><div class="ref-name">${b.repo ? `<small>${esc(b.repo)}</small>` : ''}<code>${esc(b.name)}</code></div>
-        <div class="row gap"><button class="btn sm" data-copy="${esc(b.name)}">Copiar nome</button><button class="btn sm" data-copy="${esc(checkout)}" title="${esc(checkout)}">Copiar checkout</button><button class="btn sm" data-copy="${esc(merge)}" title="${esc(merge)}">Copiar merge</button></div></li>`;
-    }).join('');
-    return `<div class="development">
-      <div class="section-head"><h3>Branches <span>${d.branches.length}</span></h3>${all ? `<button class="btn pri" data-copy="${esc(all)}" title="Copiar os comandos e nomes desta demanda">Copiar tudo</button>` : ''}</div>
-      ${brs ? `<ul class="ref-list">${brs}</ul>` : note('Nenhuma branch vinculada.')}
-      ${commandSection(d.sql.map(command => ({ command })), false)}
-      <div class="section-head"><h3>Pull requests <span>${d.dev.prs.length}</span></h3></div>
+    if (!linkedBranches.length && !prs && !d.dev.builds && !d.dev.error) return '';
+    return `<details class="issue-more"><summary>Integração Git · ${d.dev.prs.length} PR</summary>
+      ${linkedBranches.length ? `<h3>Branches vinculadas no Git</h3><ul class="field-values">${fieldRows(gitFields)}</ul>` : ''}
       ${prs || note('Nenhum pull request vinculado.')}
       ${d.dev.builds ? note(d.dev.builds + ' build(s) no painel Desenvolvimento.') : ''}${d.dev.error ? note('Painel Desenvolvimento indisponível: ' + d.dev.error) : ''}
-      ${originalFields(d)}
-    </div>`;
+    </details>`;
   }
 
   async function renderComments(d) {
@@ -1266,8 +1267,15 @@
     const first = entries[0].text.trim();
     return `<details class="dep-field"><summary aria-label="${esc(label)} de ${esc(issueKey)}, ${entries.length} itens">
       <b>${label} <span>${entries.length}</span></b><small>${esc(first.split('\n')[0])}</small></summary>
-      <ul>${entries.map(({ group, text }, i) => `<li>${group && group !== entries[i - 1]?.group ? `<strong>${esc(group)}</strong>` : ''}
-        <div><pre>${esc(text)}</pre><button class="btn sm" data-copy="${esc(text)}" aria-label="Copiar item ${i + 1} de ${label}">Copiar</button></div></li>`).join('')}</ul></details>`;
+      <ul class="field-values">${fieldRows({ label, entries })}</ul></details>`;
+  }
+  function fieldRows({ label, entries }, start = 0, end = entries.length) {
+    return entries.slice(start, end).map(({ group, text }, i) => {
+      const index = start + i;
+      const heading = group && (!i || group !== entries[index - 1]?.group);
+      return `<li>${heading ? `<strong>${esc(group)}</strong>` : ''}
+        <div><pre>${esc(text)}</pre><button class="btn sm" data-copy="${esc(text)}" aria-label="Copiar item ${index + 1} de ${label}">Copiar</button></div></li>`;
+    }).join('');
   }
   function deployIssue(r) {
     const remove = `<button class="ic sm" data-toggle-deploy="${esc(r.key)}" title="Retirar do deploy" aria-label="Retirar ${esc(r.key)} do deploy">×</button>`;
@@ -1423,6 +1431,7 @@
     const b = e.target.closest('button');
     if (!b) return;
     const a = b.dataset.action;
+    if (a === 'history-retry') { showSummaryHistory(current, b.parentElement); b.disabled = true; return; }
     if (a === 'back') { await goBack(); return; }
     if (b.dataset.fmt) { e.preventDefault(); formatCmd(b.dataset.fmt); return; }
     if (b.dataset.source) { showDeploySource(b.dataset.source, true); return; }
