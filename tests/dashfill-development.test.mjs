@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { branchCommands, developmentDetails, isDevelopmentField } from '../profiles/dev/files/lib/dashfill-development.js';
+import { branchCommands, deployReport, developmentDetails, isDevelopmentField } from '../profiles/dev/files/lib/dashfill-development.js';
 
 const defs = [{ id: 'branch', name: 'Branch' }, { id: 'script', name: 'Comandos SQL' }];
 const paragraph = text => ({ type: 'paragraph', content: [{ type: 'text', text }] });
@@ -42,9 +42,32 @@ test('preserva SQL, quebras, literais e instruções repetidas na ordem do Jira'
 });
 
 test('lê links de branch e listas, e aceita demanda sem campos de desenvolvimento', () => {
-  assert.deepEqual(developmentDetails([], {}, []), { branches: [], sql: [], envs: [], sources: [] });
+  assert.deepEqual(developmentDetails([], {}, []), { branches: [], sql: [], envs: [], sources: [], deploy: { branches: [], sql: [], envs: [] } });
   const { branches } = developmentDetails([], { branch: [{ value: 'main' }, { url: 'https://example.org/team/repo/tree/feat%2Fapp-5' }] }, defs);
   assert.deepEqual(branches.map(b => b.name), ['main', 'feat/app-5']);
+});
+
+test('Deploy usa BRANCH, .env e Arquivos SQL da demanda e dá preferência aos campos próprios', () => {
+  const definitions = [
+    { id: 'customfield_101', name: 'BRANCH' }, { id: 'customfield_524', name: '.env' },
+    { id: 'customfield_892', name: 'Arquivos SQL' },
+  ];
+  assert.ok(definitions.every(isDevelopmentField));
+  const fields = {
+    customfield_101: doc(paragraph('Doctor:'), paragraph('fix/app-1'), paragraph('SELECT 100;'), paragraph('FLAG=antiga')),
+    customfield_524: doc(paragraph('FLAG=nova')),
+    customfield_892: doc(paragraph('SELECT 200;')),
+    description: doc(paragraph('DESCRICAO=exemplo'), paragraph('SELECT 300;')),
+  };
+  const git = [{ name: 'branch-da-integracao' }];
+  const parsed = developmentDetails(git, fields, definitions);
+  assert.deepEqual(parsed.deploy, {
+    branches: [{ name: 'fix/app-1', repo: 'Doctor' }], sql: ['SELECT 200;'], envs: [{ command: 'FLAG=nova', section: '.env' }],
+  });
+  const legacy = developmentDetails(git, { ...fields, customfield_524: null, customfield_892: null }, definitions).deploy;
+  assert.deepEqual(legacy.sql, ['SELECT 100;']);
+  assert.deepEqual(legacy.envs.map(e => e.command), ['FLAG=antiga']);
+  assert.deepEqual(developmentDetails(git, { description: fields.description }, definitions).deploy, { branches: [], envs: [], sql: [] });
 });
 
 test('descobre campos ENV pelo nome e preserva fontes sem interpretação', () => {
@@ -62,5 +85,23 @@ test('descobre campos ENV pelo nome e preserva fontes sem interpretação', () =
   assert.deepEqual(data.sql, []);
   assert.equal(data.sources[0].text, raw);
   assert.deepEqual(data.sources[1].value, description);
+});
+
+test('cópia do deploy mantém demanda, campos, grupos e texto livre em um lote grande', () => {
+  const issues = Array.from({ length: 12 }, (_, i) => {
+    const fields = {
+      branch: 'API: feat/teste-' + i, script: "SELECT 'a;b';\nSELECT 2;",
+      env: Array.from({ length: 24 }, (_, n) => 'TESTE_' + n + '=' + i).join('\n') + '\n# confirmar no ambiente',
+    };
+    return { key: 'APP-' + i, summary: 'Demanda ' + i, ...developmentDetails([], fields, [...defs, { id: 'env', name: '.env' }]) };
+  });
+  const blocks = deployReport(issues).split('\n\n────────────────────\n\n');
+  assert.equal(blocks.length, issues.length);
+  for (const [i, text] of blocks.entries()) {
+    assert.ok(text.startsWith(`APP-${i} — Demanda ${i}\n\nBranches\nAPI:\nfeat/teste-${i}\n\nSQL\nSELECT 'a;b';\nSELECT 2;\n\nENVs\n`));
+    assert.ok(text.includes('TESTE_23=' + i));
+    assert.ok(text.endsWith('# confirmar no ambiente'));
+    assert.doesNotMatch(text, /git (checkout|merge)/);
+  }
 });
 

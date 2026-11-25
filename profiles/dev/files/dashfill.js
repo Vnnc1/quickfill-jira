@@ -6,7 +6,7 @@
   const url = (file) => chrome.runtime.getURL(file);
   const [
     { extractLinks, formatMinutes, formatHM, timelineMetrics, issueKey },
-    { developmentDetails, branchCommands, isDevelopmentField },
+    { developmentDetails, branchCommands, isDevelopmentField, deployFields, deployReport },
     { renderHistory },
     { loadAccent },
     { clockText, autoStartCandidate, addSkip, worklogFor, isDoingStatus, enteredStatusAt },
@@ -33,6 +33,7 @@
     <section class="dock" aria-label="DashFill" hidden>
       <div class="grip" title="Arraste para mudar a altura" aria-hidden="true"></div>
       <header class="bar">
+        <button class="btn sm" data-action="back" hidden>‹ Voltar</button>
         <span class="mark">QF</span>
         <div class="who"></div>
         <nav class="modes" aria-label="Modos do DashFill"></nav>
@@ -251,6 +252,8 @@
   let key = '', current = null, colView = null, route = '', refreshedAt = 0, confirmBox = null;
   let seq = 0, daySeq = 0, sessionOn = false, deployList = [], focus = null, myKeys = null, skip = null;
   const reserved = new Map();
+  const panelHistory = [];
+  let deployColumn = null;
   let dialogOpen = false;
   try {
     const saved = sessionStorage.getItem(PREF);
@@ -322,7 +325,7 @@
   const CARD_SEL = '[data-testid*="board-kit.ui.card"],[data-testid*="card.container"],[data-rbd-draggable-id],[data-issue-key]';
   const ITEM_SEL = 'li,[role="listitem"],article';
   const ISSUE_LINK = 'a[href*="/browse/"],a[href*="selectedIssue="],a[href*="selectedIssueKey="]';
-  const COL_SEL = '[data-testid*="board-kit.ui.column"],[data-rbd-droppable-id^="column"],[data-testid*="board-column"]';
+  const COL_SEL = '[data-testid*="board-kit.ui.column"],[data-rbd-droppable-id^="column"],[data-testid*="board-column"],[data-component-selector*="board-kit.ui.column"],[data-column-id]';
   const boardRoute = () => /\/boards?\/\d+(?:\/|$)|\/projects\/[^/]+\/board\/?$|\/secure\/RapidBoard\.jspa$/i.test(location.pathname) || !!document.querySelector(COL_SEL);
   function cardAt(el) {
     const node = el?.closest?.(ITEM_SEL) || el?.closest?.('[data-rbd-draggable-id],[data-issue-key]') || el?.closest?.(CARD_SEL);
@@ -345,16 +348,37 @@
   }
   function columns() {
     const out = [];
-    for (const col of document.querySelectorAll(COL_SEL)) {
-      if (out.some((o) => o.el.contains(col) || col.contains(o.el))) continue;
-      const head = col.querySelector('h2,h3,[data-testid*="column-header"],[data-testid*="title"]');
-      const name = (head?.textContent || col.getAttribute('aria-label') || '').replace(/\d+\s*$/, '').trim();
-      out.push({ el: col, head: head || col, name, keys: [...cardNodes(col).keys()] });
+    const titles = 'h2,h3,[role="heading"],[data-testid*="column-name"],[data-testid*="column-title"],[data-testid*="column-heading"],[data-component-selector*="column-title"]';
+    const board = document.querySelector('#jira-page-layout-main,main,[role="main"]') || document;
+    function add(el, head) {
+      const name = (head?.textContent?.trim() || el.getAttribute('aria-label') || '').replace(/\s*[(\[]?\d+[)\]]?\s*$/, '').trim();
+      if (!name) return;
+      if (!el.checkVisibility({ visibilityProperty: true })) return;
+      out.push({ el, head: head || el, name, get keys() {
+        return [...cardNodes(el)].filter(([, node]) => el.contains(node) && node.checkVisibility({ visibilityProperty: true }) &&
+          !node.parentElement?.closest('[data-qf-card]')).map(([k]) => k);
+      } });
+    }
+    for (const col of board.querySelectorAll(COL_SEL)) {
+      if (out.some(o => o.el.contains(col))) continue;
+      const heads = [...col.querySelectorAll(titles)].filter(h => !h.closest(CARD_SEL));
+      const head = heads[0] || col.querySelector('[data-testid*="column-header"],[data-testid*="column.header"]');
+      if (head && heads.some(h => h !== head && !head.contains(h) && !h.contains(head))) continue;
+      add(col, head);
+    }
+    // Alguns espaços do Jira só expõem o título e a lista de cards na árvore semântica.
+    for (const head of board.querySelectorAll(titles)) {
+      if (!isDeployEntry(head.textContent) || head.closest(CARD_SEL) || out.some(c => c.head === head || c.el.contains(head))) continue;
+      let el = head.parentElement;
+      while (el && el !== board && !el.querySelector(CARD_SEL + ',' + ISSUE_LINK)) el = el.parentElement;
+      if (el && el !== board && ![...el.querySelectorAll(titles)].some(h => h !== head && !head.contains(h) && !h.contains(head) && !h.closest(CARD_SEL))) add(el, head);
     }
     return out;
   }
   const boardProjects = () => [...new Set([...cardNodes().keys()].map((k) => k.split('-')[0]))];
-  const isPrCol = (name) => /^(pr|pull request|feito|done|code review|revis)/i.test(name);
+  const columnLabel = name => name.trim().replace(/^[^\p{L}]+/u, '');
+  const isDeployCol = name => /^deploy\b/i.test(columnLabel(name));
+  const isDeployEntry = name => isDeployCol(name) || /^(?:pr|pull requests?|feito|done)(?:\s*\d+)?$/i.test(columnLabel(name));
 
   const ICON_OPEN = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
   const ICON_DEPLOY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.5M4 7.5l4-4 4 4M3.5 13h9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -476,15 +500,48 @@
     if (runStrip.dataset.sig !== sig) { runStrip.innerHTML = runStripHtml(f, info, !own); runStrip.dataset.sig = sig; }
   }
 
-  /* Botões sobre as colunas: listar todas as demandas da coluna na barra. */
+  const deployLaunchers = new Map();
+  function syncDeployLaunchers(cols) {
+    const targets = cols.filter(c => isDeployEntry(c.name));
+    for (const [head, launcher] of deployLaunchers) {
+      if (targets.some(c => c.head === head && c.name === launcher.dataset.column) && launcher.isConnected) continue;
+      launcher.remove();
+      deployLaunchers.delete(head);
+    }
+    for (const { head, el, name } of targets) {
+      if (deployLaunchers.has(head)) continue;
+      const launcher = document.createElement('span');
+      launcher.dataset.column = name;
+      const shadow = launcher.attachShadow({ mode: 'open' });
+      shadow.innerHTML = `<style>:host{display:inline-flex;vertical-align:middle;margin-inline:6px}button{font:600 12px/1.25 -apple-system,"Segoe UI",sans-serif;color:var(--ds-text-success,#80dfb5);background:var(--ds-background-success,#20352b);border:1px solid var(--ds-border-success,#45765e);border-radius:5px;padding:3px 8px;cursor:pointer}button:hover{filter:brightness(1.15)}button:focus-visible{outline:2px solid currentColor;outline-offset:2px}</style><button type="button">Deploy</button>`;
+      shadow.querySelector('button').setAttribute('aria-label', 'Ver deploy da coluna ' + name);
+      for (const type of ['pointerdown', 'mousedown', 'keydown', 'keyup']) launcher.addEventListener(type, e => e.stopPropagation());
+      launcher.addEventListener('click', e => {
+        e.preventDefault(); e.stopPropagation();
+        if (!active || dialogOpen) return;
+        const column = columns().find(c => c.head === head);
+        if (column) loadDeployColumn(column);
+      });
+      const interactive = head.closest('button,a,[role="button"],[contenteditable="true"]');
+      if (interactive && el.contains(interactive)) interactive.after(launcher);
+      else if (head === el) el.prepend(launcher);
+      else head.append(launcher);
+      deployLaunchers.set(head, launcher);
+    }
+    const fallback = modesEl.querySelector('[data-mode="deploy"]');
+    if (fallback) fallback.hidden = deployLaunchers.size > 0;
+  }
+
+  /* As outras colunas mantêm o atalho de listagem. */
   function placeColButtons() {
-    if (!active || dialogOpen) { colBox.replaceChildren(); return; }
+    if (!active || dialogOpen) { syncDeployLaunchers([]); colBox.replaceChildren(); return; }
     const cols = columns(), top = dock.hidden ? innerHeight : dock.getBoundingClientRect().top;
+    syncDeployLaunchers(cols);
     const html = cols.map((c, i) => {
+      if (isDeployEntry(c.name)) return '';
       const r = c.head.getBoundingClientRect();
       if (r.width < 60 || r.bottom < 0 || r.top > top - 20 || r.right < 0 || r.left > innerWidth) return '';
-      const pr = isPrCol(c.name);
-      return `<button class="colbtn ${pr ? 'pr' : ''} ${colView?.name === c.name && view === 'column' ? 'on' : ''}" data-col="${i}" style="left:${Math.round(r.right - (pr ? 92 : 30))}px;top:${Math.round(r.top + r.height / 2 - 12)}px" title="Listar as ${c.keys.length} demandas de ${esc(c.name)} no DashFill" aria-label="Listar ${esc(c.name)} no DashFill">${pr ? `Listar <b>${c.keys.length}</b>` : '≡'}</button>`;
+      return `<button class="colbtn ${colView?.name === c.name && view === 'column' ? 'on' : ''}" data-col="${i}" style="left:${Math.round(r.right - 30)}px;top:${Math.round(r.top + r.height / 2 - 12)}px" title="Listar as demandas de ${esc(c.name)} no DashFill" aria-label="Listar ${esc(c.name)} no DashFill">≡</button>`;
     }).join('');
     if (colBox.innerHTML !== html) colBox.innerHTML = html;
   }
@@ -804,6 +861,7 @@
   /* ================================================================ */
   function drawBar() {
     const fold = $('[data-action=fold]');
+    $('[data-action=back]').hidden = folded;
     fold.querySelector('b').textContent = folded ? 'Abrir painel' : 'Recolher';
     sizesEl.hidden = folded;
     fold.setAttribute('aria-expanded', String(!folded));
@@ -833,12 +891,47 @@
     requestAnimationFrame(() => { reserveBoard(); placeColButtons(); });
   }
 
-  function setView(v) {
+  function rememberPanel() {
+    panelHistory.push({ view, key, tab, colView, folded, scroll: body.scrollTop,
+      listScroll: body.querySelector('.dep-l')?.scrollTop || 0,
+      expanded: [...body.querySelectorAll('[data-dep-issue] details[open]')].map(el =>
+        [el.closest('[data-dep-issue]').dataset.depIssue, el.querySelector('summary').getAttribute('aria-label')]) });
+  }
+  async function goBack() {
+    const sourceBack = body.querySelector('.dep-back');
+    if (sourceBack?.offsetWidth) { closeDeploySource(); return; }
+    const previous = panelHistory.pop();
+    ++seq;
+    confirmBox = null;
+    if (!previous) { folded = true; drawBar(); return; }
+    ({ view, key, tab, colView, folded } = previous);
+    current = cache.get(key)?.data || null;
+    drawBar(); paintCards();
+    if (folded) return;
+    const pending = view === 'issue' && key ? openIssue(key) : render();
+    const revision = seq;
+    await pending;
+    if (revision !== seq) return;
+    const list = body.querySelector('.dep-l');
+    if (list) {
+      for (const [k, label] of previous.expanded) {
+        const row = list.querySelector(`[data-dep-issue="${CSS.escape(k)}"]`);
+        const summary = row?.querySelector(`summary[aria-label="${CSS.escape(label)}"]`);
+        if (summary) summary.parentElement.open = true;
+      }
+      list.scrollTop = previous.listScroll;
+    }
+    body.scrollTop = previous.scroll;
+  }
+  function setView(v, column) {
+    if (folded || view !== v || (column && colView?.head !== column.head)) rememberPanel();
+    if (column) colView = column;
     view = v; confirmBox = null; folded = false;
     drawBar(); render(); paintCards();
   }
   async function openIssue(k, force = false, nextTab) {
     if (!validKey(k)) return;
+    if (folded || view !== 'issue' || k !== key || (nextTab && tab !== nextTab)) rememberPanel();
     if (k !== key || nextTab) { tab = nextTab || 'resumo'; body.scrollTop = 0; }
     key = k; view = 'issue'; folded = false; confirmBox = null;
     current = !force && cache.has(k) ? cache.get(k).data : null;
@@ -950,14 +1043,16 @@
       ${rows ? `<ul class="ref-list">${rows}</ul>` : note(env ? 'Nenhuma ENV identificada nesta demanda.' : 'Nenhum comando SQL identificado nesta demanda.')}`;
   }
 
+  function sourceFieldHtml({ name, value, text }) {
+    return `<section class="source-field"><h4>${esc(name)}</h4>${value?.type === 'doc' ? `<div class="rich">${adf(value)}</div>` : `<pre>${esc(text)}</pre>`}</section>`;
+  }
   function originalFields(d) {
-    const fields = d.sources.map(({ name, value, text }) =>
-      `<section class="source-field"><h4>${esc(name)}</h4>${value?.type === 'doc' ? `<div class="rich">${adf(value)}</div>` : `<pre>${esc(text)}</pre>`}</section>`).join('');
+    const fields = d.sources.map(sourceFieldHtml).join('');
     const warning = d.fieldsUnavailable ? note('Não foi possível carregar os campos de desenvolvimento. Use Atualizar para tentar novamente.', 'err') : '';
     return `${warning}<details class="source-fields"><summary>Ver texto original da demanda <span class="k">${esc(d.key)}</span></summary>${fields || note('Nenhum campo de desenvolvimento ou descrição preenchido.')}</details>`;
   }
 
-  function developmentHtml(d, deploy = false) {
+  function developmentHtml(d) {
     const prs = d.dev.prs.map((p) => {
       const ok = p.reviewers.filter((x) => x.ok).length;
       return `<article class="g-card pr-card ${p.state.toLowerCase()}">
@@ -970,7 +1065,7 @@
       const { checkout, merge } = branchCommands(b.name);
       return [b.repo ? b.repo + ' · ' + b.name : b.name, checkout, merge].join('\n');
     });
-    const all = [...branchText, ...d.sql, ...(deploy ? d.envs.map(e => e.command) : [])].join('\n\n');
+    const all = [...branchText, ...d.sql].join('\n\n');
     const brs = d.branches.map(b => {
       const { checkout, merge } = branchCommands(b.name);
       return `<li class="branch-row"><div class="ref-name">${b.repo ? `<small>${esc(b.repo)}</small>` : ''}<code>${esc(b.name)}</code></div>
@@ -979,10 +1074,9 @@
     return `<div class="development">
       <div class="section-head"><h3>Branches <span>${d.branches.length}</span></h3>${all ? `<button class="btn pri" data-copy="${esc(all)}" title="Copiar os comandos e nomes desta demanda">Copiar tudo</button>` : ''}</div>
       ${brs ? `<ul class="ref-list">${brs}</ul>` : note('Nenhuma branch vinculada.')}
-      ${!deploy || d.sql.length ? commandSection(d.sql.map(command => ({ command })), false) : ''}
-      ${deploy && d.envs.length ? commandSection(d.envs, true) : ''}
-      ${!deploy || prs ? `<div class="section-head"><h3>Pull requests <span>${d.dev.prs.length}</span></h3></div>
-      ${prs || note('Nenhum pull request vinculado.')}` : ''}
+      ${commandSection(d.sql.map(command => ({ command })), false)}
+      <div class="section-head"><h3>Pull requests <span>${d.dev.prs.length}</span></h3></div>
+      ${prs || note('Nenhum pull request vinculado.')}
       ${d.dev.builds ? note(d.dev.builds + ' build(s) no painel Desenvolvimento.') : ''}${d.dev.error ? note('Painel Desenvolvimento indisponível: ' + d.dev.error) : ''}
       ${originalFields(d)}
     </div>`;
@@ -1024,8 +1118,7 @@
 
   /* ---------------- Coluna ---------------- */
   async function openColumn(c) {
-    colView = { name: c.name, keys: c.keys };
-    setView('column');
+    setView('column', c);
   }
   async function renderColumn() {
     const s = ++seq, cv = colView;
@@ -1151,45 +1244,100 @@
     if (view === 'deploy') renderDeploy();
     else if (view === 'column' || (view === 'issue' && tab === 'resumo')) render();
   }
+  let deployRows = new Map(), sourceKey = '', loadableColumns = [];
+  function loadDeployColumn(column) {
+    deployColumn = column;
+    deployList = column.keys;
+    for (const k of deployList) cache.delete(k);
+    fieldIdsP = null;
+    saveDeploy();
+    setView('deploy');
+  }
+  function deployColumnActions() {
+    const entries = columns().filter(c => isDeployEntry(c.name));
+    const available = entries.filter(c => isDeployCol(c.name));
+    const currentColumn = entries.find(c => c.head === deployColumn?.head);
+    loadableColumns = available.length ? available : currentColumn ? [currentColumn] : entries;
+    return loadableColumns.map((c, i) =>
+      `<button class="btn sm" data-load-column="${i}">Carregar coluna ${esc(c.name)}</button>`).join('');
+  }
+  function deployPreview({ label, entries }, issueKey) {
+    if (!entries.length) return `<div class="dep-field vacant"><span>${label}</span><small>Sem itens</small></div>`;
+    const first = entries[0].text.trim();
+    return `<details class="dep-field"><summary aria-label="${esc(label)} de ${esc(issueKey)}, ${entries.length} itens">
+      <b>${label} <span>${entries.length}</span></b><small>${esc(first.split('\n')[0])}</small></summary>
+      <ul>${entries.map(({ group, text }, i) => `<li>${group && group !== entries[i - 1]?.group ? `<strong>${esc(group)}</strong>` : ''}
+        <div><pre>${esc(text)}</pre><button class="btn sm" data-copy="${esc(text)}" aria-label="Copiar item ${i + 1} de ${label}">Copiar</button></div></li>`).join('')}</ul></details>`;
+  }
+  function deployIssue(r) {
+    const remove = `<button class="ic sm" data-toggle-deploy="${esc(r.key)}" title="Retirar do deploy" aria-label="Retirar ${esc(r.key)} do deploy">×</button>`;
+    if (r.error) return `<div class="rw err"><span class="k">${esc(r.key)}</span><span class="err-t">${esc(r.error)}</span>${remove}</div>`;
+    return `<header><button class="rw-main" data-key="${esc(r.key)}" title="Abrir a demanda"><span class="k">${esc(r.key)}</span><b>${esc(r.summary)}</b></button>
+      <button class="btn sm" data-source="${esc(r.key)}" aria-pressed="${sourceKey === r.key}">Ver original</button>${remove}</header>
+      <div class="dep-fields">${deployFields(r).map(field => deployPreview(field, r.key)).join('')}</div>
+      ${r.fieldsUnavailable ? note('Campos do Jira indisponíveis. Use Atualizar para tentar novamente.', 'err') : ''}`;
+  }
+  function showDeploySource(k, navigate = false) {
+    sourceKey = k;
+    const aside = body.querySelector('.dep-source'), r = deployRows.get(k);
+    if (!aside) return;
+    for (const b of body.querySelectorAll('[data-source]')) b.setAttribute('aria-pressed', String(b.dataset.source === k));
+    const fields = r?.sources?.filter(s => s.name !== 'Descrição') || [];
+    const description = r?.sources?.find(s => s.name === 'Descrição');
+    aside.innerHTML = `<button class="btn sm dep-back" data-action="back-deploy">Voltar à lista</button><h3>Campos originais do Jira</h3><div class="dep-source-title"><span class="k">${esc(k)}</span> ${esc(r?.summary || '')}</div>
+      ${!r ? note('Carregando campos…') : r.error ? note(r.error, 'err') : (fields.map(sourceFieldHtml).join('') || note('Nenhum campo de desenvolvimento preenchido.'))}
+      ${description ? `<details class="source-fields"><summary>Descrição da demanda</summary>${sourceFieldHtml(description)}</details>` : ''}`;
+    aside.scrollTop = 0;
+    if (navigate) {
+      aside.parentElement.toggleAttribute('data-reading', true);
+      const back = aside.querySelector('.dep-back');
+      if (back.offsetWidth) back.focus({ preventScroll: true });
+    }
+  }
+  function closeDeploySource() {
+    body.querySelector('.dep')?.removeAttribute('data-reading');
+    body.querySelector('[data-source][aria-pressed="true"]')?.focus();
+  }
   async function renderDeploy() {
     const s = ++seq;
-    if (!deployList.length) {
-      body.innerHTML = `<div class="empty"><b>Monte a lista do deploy</b><p>Passe o mouse no card e clique em <b>⇪</b>, ou Shift+clique no card. O QuickFill junta branch e PR de cada demanda e prepara o comando, as notas e o card "Realizando Deploy".</p>
-        <button class="btn sm pri" data-action="add-feito">Adicionar tudo de Feito / PR</button></div>`;
+    const keys = [...deployList];
+    deployRows = new Map();
+    if (!keys.length) {
+      body.innerHTML = `<div class="empty"><b>Nenhuma demanda no deploy</b><p>Carregue os cards de uma coluna do quadro ou adicione uma demanda pelo próprio card.</p>
+        ${deployColumnActions()}</div>`;
       return;
     }
-    body.innerHTML = skeleton();
-    const rows = await mapLimit(deployList, 4, (k) => issueData(k));
+    if (!keys.includes(sourceKey)) sourceKey = keys[0];
+    body.innerHTML = `<div class="dep-tools"><strong>${keys.length} ${keys.length === 1 ? 'demanda' : 'demandas'}</strong>
+      <button class="btn pri" data-action="copy-deploy" disabled>Copiar tudo</button>
+      <span class="muted" role="status" data-dep-progress></span><span class="grow"></span>
+      ${deployColumnActions()}<button class="btn sm" data-action="clear-deploy">Limpar</button>
+      <details class="dep-jira"><summary>No Jira</summary><div><button class="btn sm" data-action="ask-card">Criar card de deploy</button>
+        <button class="btn sm" data-action="ask-move">Mover para Deploy</button></div></details></div>
+      ${confirmBox ? `<div class="confirm" role="alertdialog" aria-label="Confirmar">${confirmBox}</div>` : ''}
+      <div class="dep"><section class="dep-l" aria-label="Demandas do deploy">${keys.map(k =>
+        `<article class="deploy-issue" data-dep-issue="${esc(k)}"><span class="k">${esc(k)}</span> <span class="muted">Carregando…</span></article>`).join('')}</section>
+      <aside class="dep-source" aria-label="Campos originais do Jira"></aside></div>`;
+    const progress = body.querySelector('[data-dep-progress]');
+    const slots = [...body.querySelectorAll('[data-dep-issue]')];
+    showDeploySource(sourceKey);
+    await mapLimit(keys, 4, async (k, i) => {
+      if (s !== seq || view !== 'deploy') return;
+      let row;
+      try { row = await issueData(k); }
+      catch (error) { row = { key: k, error: error.message }; }
+      if (s !== seq || view !== 'deploy') return;
+      deployRows.set(k, row);
+      slots[i].innerHTML = deployIssue(row);
+      progress.textContent = `${deployRows.size}/${keys.length} carregadas`;
+      if (sourceKey === k) showDeploySource(k);
+    });
     if (s !== seq || view !== 'deploy') return;
-    const ok = rows.filter((r) => !r.error);
-    const branches = [...new Set(ok.flatMap(r => r.branches.map(b => b.name)))];
-    const warn = ok.filter((r) => readiness(r).tone === 'warn');
-    const repos = new Map();
-    for (const r of ok) for (const b of r.branches) {
-      const repo = b.repo || '';
-      if (!repos.has(repo)) repos.set(repo, new Set());
-      repos.get(repo).add(b.name);
-    }
-    const gitActions = [...repos].map(([repo, names]) => {
-      const commands = ['git fetch origin', ...[...names].map(name => branchCommands(name).mergeOnly)];
-      return `<button class="act" data-copy="${esc(commands.join('\n'))}"><b>Copiar comando Git</b><span>${esc(repo || 'Repositório não informado')} · ${names.size} branch(es)</span></button>`;
-    }).join('');
-    const notes = ok.map((r) => `- [${r.key}] ${r.summary}`).join('\n');
-    body.innerHTML = `<div class="dep">
-      <section class="dep-l">
-        <div class="list-h"><b>${deployList.length} ${deployList.length === 1 ? 'demanda' : 'demandas'}</b><span class="muted">${branches.length} ${branches.length === 1 ? 'branch' : 'branches'}${warn.length ? ` · <span class="warn-t">${warn.length} pedem atenção</span>` : ' · tudo pronto'}</span><span class="grow"></span><button class="btn sm" data-action="add-feito">+ Tudo de Feito / PR</button><button class="btn sm" data-action="clear-deploy">Limpar</button></div>
-        <div class="rows">${rows.map((r) => r.error ? `<div class="rw err"><span class="k">${esc(r.key)}</span><span class="err-t">${esc(r.error)}</span><button class="ic sm" data-toggle-deploy="${esc(r.key)}">✕</button></div>` : `<article class="deploy-issue">${rowHtml(r)}${developmentHtml(r, true)}</article>`).join('')}</div>
-      </section>
-      <aside class="dep-a">
-        <h3>Preparar</h3>
-        <button class="act" data-copy="${esc(branches.join('\n'))}" ${branches.length ? '' : 'disabled'}><b>Copiar branches</b><span>uma por linha</span></button>
-        ${gitActions}
-        <button class="act" data-copy="${esc(notes)}"><b>Copiar notas da release</b><span>chave e título, em lista</span></button>
-        <h3>No Jira</h3>
-        <button class="act" data-action="ask-card"><b>Criar card "Realizando Deploy"</b><span>ligado às demandas da lista</span></button>
-        <button class="act" data-action="ask-move"><b>Mover para Deploy</b><span>todas que puderem ir</span></button>
-        ${confirmBox ? `<div class="confirm" role="alertdialog" aria-label="Confirmar">${confirmBox}</div>` : ''}
-      </aside></div>`;
+    const failures = [...deployRows.values()].filter(r => r.error || r.fieldsUnavailable).length;
+    progress.textContent = failures ? `Dados incompletos em ${failures} de ${keys.length}. Use Atualizar.` : '';
+    const copyButton = body.querySelector('[data-action="copy-deploy"]');
+    copyButton.textContent = failures ? 'Copiar dados disponíveis' : 'Copiar tudo';
+    copyButton.disabled = false;
   }
   async function deployersList() {
     try { const { deployers } = await chrome.storage.sync.get({ deployers: '' }); const l = JSON.parse(deployers || '[]'); return Array.isArray(l) ? l.filter((p) => p.accountId) : []; } catch { return []; }
@@ -1275,7 +1423,11 @@
     const b = e.target.closest('button');
     if (!b) return;
     const a = b.dataset.action;
+    if (a === 'back') { await goBack(); return; }
     if (b.dataset.fmt) { e.preventDefault(); formatCmd(b.dataset.fmt); return; }
+    if (b.dataset.source) { showDeploySource(b.dataset.source, true); return; }
+    if (a === 'back-deploy') { closeDeploySource(); return; }
+    if (a === 'copy-deploy') { copy(deployReport(deployList.map(k => deployRows.get(k))), b); return; }
     if (b.dataset.mode) {
       const m = b.dataset.mode;
       if (m === 'issue' && key) openIssue(key); else setView(m);
@@ -1293,21 +1445,22 @@
     if (a === 'ms-refresh') { loadSide(side.key); refreshDay(); return; }
     if (a === 'day') setDay(!expandedDay);
     else if (a === 'day-refresh') refreshDay();
-    else if (a === 'refresh') { if (view === 'issue') openIssue(key, true); else { cache.clear(); render(); } }
+    else if (a === 'refresh') { fieldIdsP = null; if (view === 'issue') openIssue(key, true); else { cache.clear(); render(); } }
     else if (a === 'fold') { folded = !folded; drawBar(); render(); }
-    else if (a === 'add-feito') {
-      const keys = columns().filter((c) => isPrCol(c.name)).flatMap((c) => c.keys);
-      if (!keys.length) flash(b, 'Nenhum card em Feito/PR visível');
-      else { deployList = [...new Set([...deployList, ...keys])]; saveDeploy(); paintCards(); drawBar(); renderDeploy(); }
+    else if (b.dataset.loadColumn !== undefined || a === 'col-to-deploy') {
+      const selected = a === 'col-to-deploy' ? colView : loadableColumns[Number(b.dataset.loadColumn)];
+      const matches = columns().filter(c => c.name === selected?.name);
+      const column = matches.find(c => c.head === selected.head) || (matches.length === 1 && matches[0]);
+      if (column) loadDeployColumn(column);
+      else render();
     }
-    else if (a === 'col-to-deploy') { deployList = [...new Set([...deployList, ...(colView?.keys || [])])]; saveDeploy(); paintCards(); setView('deploy'); }
     else if (a === 'clear-deploy') { deployList = []; saveDeploy(); paintCards(); drawBar(); renderDeploy(); }
     else if (a === 'ask-card') askCard();
     else if (a === 'do-card') doCard();
     else if (a === 'ask-move') askMove();
     else if (a === 'do-move') doMove();
     else if (a === 'cancel') { confirmBox = null; render(); }
-    if (b.dataset.tab) { body.scrollTop = 0; tab = b.dataset.tab; drawBar(); render(); tabsEl.querySelector('.on')?.focus({ preventScroll: true }); }
+    if (b.dataset.tab) { if (tab !== b.dataset.tab) rememberPanel(); body.scrollTop = 0; tab = b.dataset.tab; drawBar(); render(); tabsEl.querySelector('.on')?.focus({ preventScroll: true }); }
     if (b.dataset.copy !== undefined) copy(b.dataset.copy, b);
     if (b.dataset.toggleDeploy) toggleDeploy(b.dataset.toggleDeploy);
     if (b.dataset.play) { startTimer(b.dataset.play, b.dataset.title, b.dataset.doing === '1'); return; }
@@ -1338,11 +1491,12 @@
     if (next) {
       drawBar(); geometry(); refreshDay(); paintCards();
     } else {
+      panelHistory.length = 0; deployColumn = null;
       seq++; daySeq++; dayData = null;
       key = ''; current = null; colView = null; expandedDay = false; folded = true; view = 'issue'; confirmBox = null; myKeys = null;
       day.classList.remove('expanded'); day.replaceChildren(); body.replaceChildren(); colBox.replaceChildren();
       sideEl.hidden = true; sideEl.replaceChildren(); side.key = ''; side.data = null;
-      releaseBoard(); paintCards(); paintRunStrip();
+      syncDeployLaunchers([]); releaseBoard(); paintCards(); paintRunStrip();
     }
   }
   launch.onclick = () => {
@@ -1387,6 +1541,7 @@
     dialogOpen = visible;
     // Com o modal aberto só o painel da demanda aparece; lateral, barra e botões de coluna somem.
     host.toggleAttribute('data-dialog', visible);
+    placeColButtons();
     reserveBoard();
     updateSide();
   }
